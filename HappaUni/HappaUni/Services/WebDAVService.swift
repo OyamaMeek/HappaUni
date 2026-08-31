@@ -29,7 +29,7 @@ final class WebDAVXMLParser: NSObject, XMLParserDelegate {
     }
 
     func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String : String] = [:]) {
-        currentElement = elementName.lowercased()
+        currentElement = elementName.localName.lowercased()
         if currentElement == "response" { currentValues = [:]; isCollection = false }
         if currentElement == "collection" { isCollection = true }
     }
@@ -40,7 +40,7 @@ final class WebDAVXMLParser: NSObject, XMLParserDelegate {
     }
 
     func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
-        guard elementName.lowercased() == "response", let href = currentValues["href"]?.removingPercentEncoding else { return }
+        guard elementName.localName.lowercased() == "response", let href = currentValues["href"]?.removingPercentEncoding else { return }
         let normalized = href.hasPrefix("/") ? href : "/" + href
         let path = Self.removingServerBasePath(from: normalized, serverBasePath: serverBasePath)
         guard Self.normalized(path) != basePath else { return }
@@ -193,6 +193,12 @@ final class WebDAVService {
         guard let http = response as? HTTPURLResponse else { throw error }
         if http.statusCode == 412 { throw Error.conflict }
         guard (200...299).contains(http.statusCode) || http.statusCode == 207 else { throw error }
+    }
+}
+
+private extension String {
+    var localName: String {
+        split(separator: ":").last.map(String.init) ?? self
     }
 }
 
