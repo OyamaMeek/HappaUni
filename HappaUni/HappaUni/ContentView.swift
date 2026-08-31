@@ -400,16 +400,16 @@ private struct LibraryAddMenu: View {
             isPresented = false
             action()
         } label: {
-            VStack(spacing: 7) {
+            HStack(spacing: 8) {
                 Image(systemName: systemImage)
-                    .font(.title3.weight(.semibold))
+                    .font(.body.weight(.semibold))
                 Text(title)
-                    .font(.caption.weight(.semibold))
+                    .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
             }
-            .frame(minWidth: 72)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 10)
+            .frame(minWidth: 118, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 11)
             .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(.plain)
