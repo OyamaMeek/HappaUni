@@ -110,6 +110,31 @@ final class WebDAVService {
         try validate(response, otherwise: .makeDirectoryFailed)
     }
 
+    func ensureDirectory(
+        serverURL: URL,
+        username: String,
+        password: String,
+        path: String
+    ) async throws {
+        let directoryURL = WebDAVRemotePath.url(serverURL: serverURL, path: path)
+        do {
+            try await makeDirectory(at: directoryURL, username: username, password: password)
+        } catch {
+            let parent = WebDAVRemotePath.parent(of: path)
+            let existing = try await listDirectory(
+                url: serverURL,
+                username: username,
+                password: password,
+                path: parent
+            )
+            guard existing.contains(where: {
+                $0.isDirectory && WebDAVRemotePath.normalized($0.path) == WebDAVRemotePath.normalized(path)
+            }) else {
+                throw error
+            }
+        }
+    }
+
     func delete(at url: URL, username: String, password: String, eTag: String? = nil) async throws {
         var request = URLRequest(url: url)
         request.httpMethod = "DELETE"
@@ -154,6 +179,8 @@ private extension URLRequest {
 }
 
 enum WebDAVRemotePath {
+    static let libraryRoot = "/HappaUni"
+
     static func join(base: String, child: String) -> String {
         let trimmedBase = base.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let trimmedChild = child.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -172,5 +199,16 @@ enum WebDAVRemotePath {
         }
         components.path = href
         return components.url ?? url(serverURL: serverURL, path: href)
+    }
+
+    static func parent(of path: String) -> String {
+        let components = path.split(separator: "/")
+        guard components.count > 1 else { return "/" }
+        return "/" + components.dropLast().joined(separator: "/")
+    }
+
+    static func normalized(_ path: String) -> String {
+        let trimmed = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return trimmed.isEmpty ? "/" : "/" + trimmed
     }
 }

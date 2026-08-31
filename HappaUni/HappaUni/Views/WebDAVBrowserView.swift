@@ -6,7 +6,7 @@ struct WebDAVBrowserView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
-    @State private var path = "/"
+    @State private var path = WebDAVRemotePath.libraryRoot
     @State private var files: [WebDAVFile] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
@@ -66,7 +66,7 @@ struct WebDAVBrowserView: View {
                     } label: {
                         Label("上级", systemImage: "chevron.up")
                     }
-                    .disabled(path == "/")
+                    .disabled(path == WebDAVRemotePath.libraryRoot)
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button { isShowingUpload = true } label: {
@@ -82,7 +82,7 @@ struct WebDAVBrowserView: View {
                 WebDAVUploadView(account: account, path: path) { loadFiles() }
             }
             .task {
-                loadFiles()
+                await prepareLibraryDirectory()
                 await resumeQueuedUploads()
             }
             .alert("新建文件夹", isPresented: $isShowingNewFolder) {
@@ -119,9 +119,32 @@ struct WebDAVBrowserView: View {
     }
 
     private var parentPath: String {
-        let components = path.split(separator: "/")
-        guard components.count > 1 else { return "/" }
-        return "/" + components.dropLast().joined(separator: "/")
+        let parent = WebDAVRemotePath.parent(of: path)
+        return parent.hasPrefix(WebDAVRemotePath.libraryRoot) ? parent : WebDAVRemotePath.libraryRoot
+    }
+
+    private func prepareLibraryDirectory() async {
+        guard let serverURL = account.serverURL else {
+            errorMessage = "服务器地址无效。"
+            return
+        }
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            guard let password = try KeychainStore().value(for: account.passwordKey) else {
+                throw BrowserError.missingPassword
+            }
+            try await WebDAVService.shared.ensureDirectory(
+                serverURL: serverURL,
+                username: account.username,
+                password: password,
+                path: WebDAVRemotePath.libraryRoot
+            )
+            path = WebDAVRemotePath.libraryRoot
+            loadFiles()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func loadFiles() {

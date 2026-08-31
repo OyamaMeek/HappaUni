@@ -142,6 +142,8 @@ struct HappaUniTests {
     func joinsWebDAVPaths() {
         #expect(WebDAVRemotePath.join(base: "/notes/", child: "2026/guide.pdf") == "/notes/2026/guide.pdf")
         #expect(WebDAVRemotePath.join(base: "/", child: "/guide.pdf") == "/guide.pdf")
+        #expect(WebDAVRemotePath.libraryRoot == "/HappaUni")
+        #expect(WebDAVRemotePath.parent(of: "/HappaUni/course") == "/HappaUni")
     }
 
     @Test("GitHub sync paths recover a stable local document identifier")

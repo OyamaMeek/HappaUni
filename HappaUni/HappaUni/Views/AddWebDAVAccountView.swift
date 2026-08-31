@@ -10,6 +10,7 @@ struct AddWebDAVAccountView: View {
     @State private var username = ""
     @State private var password = ""
     @State private var isTesting = false
+    @State private var isSaving = false
     @State private var statusMessage: String?
     @State private var errorMessage: String?
 
@@ -56,6 +57,7 @@ struct AddWebDAVAccountView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") { save() }
+                        .disabled(isSaving)
                 }
             }
             .alert("WebDAV 配置", isPresented: Binding(
@@ -90,17 +92,30 @@ struct AddWebDAVAccountView: View {
     }
 
     private func save() {
-        do {
-            let accountName = try input.validatedName()
-            let url = try input.validatedURL()
-            try input.validateCredentials()
-            let account = WebDAVAccount(name: accountName, serverAddress: url.absoluteString, username: username)
-            try KeychainStore().save(password, for: account.passwordKey)
-            modelContext.insert(account)
-            try modelContext.save()
-            dismiss()
-        } catch {
-            errorMessage = error.localizedDescription
+        isSaving = true
+        Task {
+            var account: WebDAVAccount?
+            do {
+                let accountName = try input.validatedName()
+                let url = try input.validatedURL()
+                try input.validateCredentials()
+                let newAccount = WebDAVAccount(name: accountName, serverAddress: url.absoluteString, username: username)
+                account = newAccount
+                try KeychainStore().save(password, for: newAccount.passwordKey)
+                try await WebDAVService.shared.ensureDirectory(
+                    serverURL: url,
+                    username: username,
+                    password: password,
+                    path: WebDAVRemotePath.libraryRoot
+                )
+                modelContext.insert(newAccount)
+                try modelContext.save()
+                dismiss()
+            } catch {
+                if let account { try? KeychainStore().delete(account.passwordKey) }
+                errorMessage = error.localizedDescription
+            }
+            isSaving = false
         }
     }
 }
