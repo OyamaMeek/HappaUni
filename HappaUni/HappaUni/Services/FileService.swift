@@ -33,8 +33,21 @@ struct FileService {
 
     static let supportedTypes: Set<DocumentType> = [.pdf, .markdown, .tex, .epub, .text, .image]
 
-    func importDocument(from sourceURL: URL) throws -> LibraryDocument {
-        let importedFile = try importFiles([sourceURL], into: libraryDirectory())[0]
+    func importDocument(from sourceURL: URL, preferredFilename: String? = nil) throws -> LibraryDocument {
+        guard let preferredFilename else {
+            let importedFile = try importFiles([sourceURL], into: libraryDirectory())[0]
+            return importedFile.makeDocument()
+        }
+
+        let filename = URL(fileURLWithPath: preferredFilename).lastPathComponent
+        let stagingDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let renamedSourceURL = stagingDirectory.appendingPathComponent(filename)
+        defer { try? FileManager.default.removeItem(at: stagingDirectory) }
+
+        try FileManager.default.createDirectory(at: stagingDirectory, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: sourceURL, to: renamedSourceURL)
+        let importedFile = try importFiles([renamedSourceURL], into: libraryDirectory())[0]
         return importedFile.makeDocument()
     }
 

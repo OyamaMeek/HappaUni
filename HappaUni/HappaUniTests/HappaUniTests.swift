@@ -92,6 +92,23 @@ struct HappaUniTests {
         #expect(document.formattedSize == "1.5 KB")
     }
 
+    @Test("Importing a downloaded file can preserve its remote filename")
+    func preservesPreferredImportedFilename() throws {
+        let sourceURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(UUID().uuidString).pdf")
+        defer { try? FileManager.default.removeItem(at: sourceURL) }
+        try Data("PDF".utf8).write(to: sourceURL)
+
+        let service = FileService()
+        let document = try service.importDocument(
+            from: sourceURL,
+            preferredFilename: "GitHub 入门与实践.pdf"
+        )
+        defer { try? service.delete(document) }
+
+        #expect(document.name == "GitHub 入门与实践.pdf")
+    }
+
     @Test("WebDAV response parser excludes the requested directory")
     func parsesWebDAVFiles() throws {
         let xml = """

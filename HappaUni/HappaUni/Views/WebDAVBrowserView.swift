@@ -182,9 +182,13 @@ struct WebDAVBrowserView: View {
                 defer { try? FileManager.default.removeItem(at: temporaryURL) }
                 let data = try Data(contentsOf: temporaryURL)
                 _ = try WebDAVCacheStore().store(data, accountID: account.id, remotePath: file.path)
-                let document = try FileService().importDocument(from: temporaryURL)
+                let document = try FileService().importDocument(
+                    from: temporaryURL,
+                    preferredFilename: file.name
+                )
                 modelContext.insert(document)
                 try modelContext.save()
+                dismiss()
             } catch {
                 errorMessage = error.localizedDescription
             }
