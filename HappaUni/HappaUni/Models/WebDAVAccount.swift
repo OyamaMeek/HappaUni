@@ -17,7 +17,7 @@ struct WebDAVAccountInput: Equatable {
         let value = serverAddress.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { throw WebDAVAccountInputError.invalidURL }
         let address = value.contains("://") ? value : "https://\(value)"
-        guard let url = URL(string: address), let scheme = url.scheme, ["https", "http"].contains(scheme), url.host != nil else {
+        guard let url = URL(string: address), url.scheme == "https", url.host != nil else {
             throw WebDAVAccountInputError.invalidURL
         }
         return url

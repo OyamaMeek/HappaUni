@@ -12,6 +12,9 @@ struct WebDAVBrowserView: View {
     @State private var errorMessage: String?
     @State private var downloadingPath: String?
     @State private var isShowingUpload = false
+    @State private var isShowingNewFolder = false
+    @State private var newFolderName = ""
+    @State private var pendingDelete: WebDAVFile?
 
     var body: some View {
         NavigationStack {
@@ -29,6 +32,11 @@ struct WebDAVBrowserView: View {
                             } label: {
                                 FileRow(file: file)
                             }
+                            .contextMenu {
+                                Button("删除", systemImage: "trash", role: .destructive) {
+                                    pendingDelete = file
+                                }
+                            }
                         } else {
                             Button {
                                 download(file)
@@ -39,6 +47,11 @@ struct WebDAVBrowserView: View {
                                 }
                             }
                             .disabled(downloadingPath != nil)
+                            .contextMenu {
+                                Button("删除", systemImage: "trash", role: .destructive) {
+                                    pendingDelete = file
+                                }
+                            }
                         }
                     }
                 }
@@ -59,6 +72,9 @@ struct WebDAVBrowserView: View {
                     Button { isShowingUpload = true } label: {
                         Label("上传资料", systemImage: "square.and.arrow.up")
                     }
+                    Button { isShowingNewFolder = true } label: {
+                        Label("新建文件夹", systemImage: "folder.badge.plus")
+                    }
                     Button(action: loadFiles) { Label("刷新", systemImage: "arrow.clockwise") }
                 }
             }
@@ -66,6 +82,29 @@ struct WebDAVBrowserView: View {
                 WebDAVUploadView(account: account, path: path) { loadFiles() }
             }
             .task { loadFiles() }
+            .alert("新建文件夹", isPresented: $isShowingNewFolder) {
+                TextField("文件夹名称", text: $newFolderName)
+                Button("取消", role: .cancel) { newFolderName = "" }
+                Button("创建") { createDirectory() }
+            } message: {
+                Text("将在当前 WebDAV 目录中创建文件夹。")
+            }
+            .confirmationDialog(
+                "删除“\(pendingDelete?.name ?? "")”？",
+                isPresented: Binding(
+                    get: { pendingDelete != nil },
+                    set: { if !$0 { pendingDelete = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("删除", role: .destructive) {
+                    if let file = pendingDelete { delete(file) }
+                    pendingDelete = nil
+                }
+                Button("取消", role: .cancel) { pendingDelete = nil }
+            } message: {
+                Text("此操作会删除远端文件或文件夹。")
+            }
             .alert("WebDAV", isPresented: Binding(
                 get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } }
             )) {
@@ -109,17 +148,70 @@ struct WebDAVBrowserView: View {
                 guard let password = try KeychainStore().value(for: account.passwordKey) else { throw BrowserError.missingPassword }
                 let temporaryURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension(URL(fileURLWithPath: file.name).pathExtension)
                 try await WebDAVService.shared.download(
-                    url: WebDAVRemotePath.url(serverURL: serverURL, path: file.path),
+                    url: WebDAVRemotePath.requestURL(serverURL: serverURL, href: file.path),
                     username: account.username,
                     password: password,
                     to: temporaryURL
                 )
                 defer { try? FileManager.default.removeItem(at: temporaryURL) }
                 let data = try Data(contentsOf: temporaryURL)
-                _ = try WebDAVCacheStore().store(data, forRemotePath: file.path)
+                _ = try WebDAVCacheStore().store(data, accountID: account.id, remotePath: file.path)
                 let document = try FileService().importDocument(from: temporaryURL)
                 modelContext.insert(document)
                 try modelContext.save()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func createDirectory() {
+        let name = newFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
+        newFolderName = ""
+        guard !name.isEmpty else { return }
+        guard !name.contains("/") else {
+            errorMessage = "文件夹名称不能包含斜杠。"
+            return
+        }
+        guard let serverURL = account.serverURL else {
+            errorMessage = "服务器地址无效。"
+            return
+        }
+        isLoading = true
+        Task {
+            defer { isLoading = false }
+            do {
+                guard let password = try KeychainStore().value(for: account.passwordKey) else { throw BrowserError.missingPassword }
+                let remotePath = WebDAVRemotePath.join(base: path, child: name)
+                try await WebDAVService.shared.makeDirectory(
+                    at: WebDAVRemotePath.url(serverURL: serverURL, path: remotePath),
+                    username: account.username,
+                    password: password
+                )
+                loadFiles()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func delete(_ file: WebDAVFile) {
+        guard let serverURL = account.serverURL else {
+            errorMessage = "服务器地址无效。"
+            return
+        }
+        isLoading = true
+        Task {
+            defer { isLoading = false }
+            do {
+                guard let password = try KeychainStore().value(for: account.passwordKey) else { throw BrowserError.missingPassword }
+                try await WebDAVService.shared.delete(
+                    at: WebDAVRemotePath.requestURL(serverURL: serverURL, href: file.path),
+                    username: account.username,
+                    password: password,
+                    eTag: file.eTag
+                )
+                loadFiles()
             } catch {
                 errorMessage = error.localizedDescription
             }

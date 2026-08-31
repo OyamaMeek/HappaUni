@@ -102,12 +102,47 @@ final class WebDAVService {
         try validate(response, otherwise: .uploadFailed)
     }
 
-    enum Error: LocalizedError { case invalidResponse, connectionFailed, listDirectoryFailed, downloadFailed, uploadFailed
-        var errorDescription: String? { "WebDAV 请求失败，请检查服务器地址和账户信息。" }
+    func makeDirectory(at url: URL, username: String, password: String) async throws {
+        var request = URLRequest(url: url)
+        request.httpMethod = "MKCOL"
+        request.setBasicAuthorization(username: username, password: password)
+        let (_, response) = try await session.data(for: request)
+        try validate(response, otherwise: .makeDirectoryFailed)
+    }
+
+    func delete(at url: URL, username: String, password: String, eTag: String? = nil) async throws {
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        request.setBasicAuthorization(username: username, password: password)
+        if let eTag { request.setValue(eTag, forHTTPHeaderField: "If-Match") }
+        let (_, response) = try await session.data(for: request)
+        try validate(response, otherwise: .deleteFailed)
+    }
+
+    enum Error: LocalizedError {
+        case invalidResponse
+        case connectionFailed
+        case listDirectoryFailed
+        case downloadFailed
+        case uploadFailed
+        case makeDirectoryFailed
+        case deleteFailed
+        case conflict
+
+        var errorDescription: String? {
+            switch self {
+            case .conflict:
+                "远端文件已被修改，请刷新后再试。"
+            default:
+                "WebDAV 请求失败，请检查服务器地址和账户信息。"
+            }
+        }
     }
 
     private func validate(_ response: URLResponse, otherwise error: Error) throws {
-        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) || http.statusCode == 207 else { throw error }
+        guard let http = response as? HTTPURLResponse else { throw error }
+        if http.statusCode == 412 { throw Error.conflict }
+        guard (200...299).contains(http.statusCode) || http.statusCode == 207 else { throw error }
     }
 }
 
@@ -128,5 +163,14 @@ enum WebDAVRemotePath {
 
     static func url(serverURL: URL, path: String) -> URL {
         serverURL.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
+    }
+
+    static func requestURL(serverURL: URL, href: String) -> URL {
+        guard href.hasPrefix("/"),
+              var components = URLComponents(url: serverURL, resolvingAgainstBaseURL: false) else {
+            return url(serverURL: serverURL, path: href)
+        }
+        components.path = href
+        return components.url ?? url(serverURL: serverURL, path: href)
     }
 }

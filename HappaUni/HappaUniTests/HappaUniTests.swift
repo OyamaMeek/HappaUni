@@ -156,6 +156,30 @@ struct HappaUniTests {
         #expect(try Data(contentsOf: second) == Data("second".utf8))
     }
 
+    @Test("WebDAV cache isolates identical remote paths across accounts")
+    func isolatesWebDAVAccountCaches() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = WebDAVCacheStore(directory: directory)
+        let firstAccount = UUID()
+        let secondAccount = UUID()
+
+        let first = try cache.store(Data("first".utf8), accountID: firstAccount, remotePath: "/notes/guide.pdf")
+        let second = try cache.store(Data("second".utf8), accountID: secondAccount, remotePath: "/notes/guide.pdf")
+
+        #expect(first != second)
+        #expect(cache.cachedURL(accountID: firstAccount, remotePath: "/notes/guide.pdf") == first)
+        #expect(cache.cachedURL(accountID: secondAccount, remotePath: "/notes/guide.pdf") == second)
+    }
+
+    @Test("WebDAV request URLs preserve server base path and absolute DAV hrefs")
+    func resolvesWebDAVRequestURLs() {
+        let serverURL = URL(string: "https://dav.example.com/root/dav/")!
+
+        #expect(WebDAVRemotePath.url(serverURL: serverURL, path: "/notes/guide.pdf").absoluteString == "https://dav.example.com/root/dav/notes/guide.pdf")
+        #expect(WebDAVRemotePath.requestURL(serverURL: serverURL, href: "/root/dav/notes/guide.pdf").absoluteString == "https://dav.example.com/root/dav/notes/guide.pdf")
+    }
+
     @Test("Document tags normalize whitespace and duplicates")
     func normalizesDocumentTags() {
         let document = LibraryDocument(name: "paper.pdf", url: URL(fileURLWithPath: "/tmp/paper.pdf"), size: 1)
