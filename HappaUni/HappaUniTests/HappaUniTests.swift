@@ -105,6 +105,23 @@ struct HappaUniTests {
         #expect(document.isArchived)
     }
 
+    @Test("PDF annotation archives persist drawing data by document")
+    func persistsPDFAnnotationArchive() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let documentURL = URL(fileURLWithPath: "/tmp/annotated.pdf")
+        let drawings = [0: Data([0x01, 0x02]), 4: Data([0x03])]
+
+        try PDFAnnotationStore.save(drawings, for: documentURL, in: directory)
+
+        #expect(PDFAnnotationStore.load(for: documentURL, in: directory) == drawings)
+        #expect(
+            PDFAnnotationStore.identifier(for: documentURL)
+                != PDFAnnotationStore.identifier(for: URL(fileURLWithPath: "/tmp/other.pdf"))
+        )
+    }
+
     @Test("Importing a downloaded file can preserve its remote filename")
     func preservesPreferredImportedFilename() throws {
         let sourceURL = FileManager.default.temporaryDirectory
