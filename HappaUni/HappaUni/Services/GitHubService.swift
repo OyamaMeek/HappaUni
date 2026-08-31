@@ -54,11 +54,18 @@ final class GitHubService {
     }
 
     func download(repository: String, path: String) async throws -> Data {
+        guard let data = try await downloadIfExists(repository: repository, path: path) else { throw Error.requestFailed }
+        return data
+    }
+
+    func downloadIfExists(repository: String, path: String) async throws -> Data? {
         guard let owner = username else { throw Error.notAuthenticated }
         let endpoint = URL(string: "https://api.github.com/repos/\(owner)/\(repository)/contents/\(path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? path)")!
         let request = try authenticatedRequest(url: endpoint)
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { throw Error.requestFailed }
+        guard let http = response as? HTTPURLResponse else { throw Error.requestFailed }
+        if http.statusCode == 404 { return nil }
+        guard (200...299).contains(http.statusCode) else { throw Error.requestFailed }
         let file = try JSONDecoder().decode(ContentFile.self, from: data)
         guard let encoded = file.content,
               let content = Data(base64Encoded: encoded.replacingOccurrences(of: "\n", with: "")) else { throw Error.invalidResponse }

@@ -32,6 +32,54 @@ struct RestoreSummary: Equatable {
     let conflicts: [SyncConflict]
 }
 
+struct LibraryBackupManifest: Codable, Equatable {
+    static let path = "metadata/library.json"
+
+    struct Document: Codable, Equatable {
+        let id: UUID
+        let tags: [String]
+        let folderID: UUID?
+        let isFavorite: Bool
+        let createdAt: Date
+        let modifiedAt: Date
+
+        init(_ document: LibraryDocument) {
+            id = document.id
+            tags = document.tags
+            folderID = document.folderID
+            isFavorite = document.isFavorite
+            createdAt = document.createdAt
+            modifiedAt = document.modifiedAt
+        }
+    }
+
+    struct Folder: Codable, Equatable {
+        let id: UUID
+        let name: String
+        let parentID: UUID?
+        let createdAt: Date
+
+        init(_ folder: LibraryFolder) {
+            id = folder.id
+            name = folder.name
+            parentID = folder.parentID
+            createdAt = folder.createdAt
+        }
+    }
+
+    let schemaVersion: Int
+    let exportedAt: Date
+    let documents: [Document]
+    let folders: [Folder]
+
+    init(documents: [LibraryDocument], folders: [LibraryFolder], exportedAt: Date = .now) {
+        schemaVersion = 1
+        self.exportedAt = exportedAt
+        self.documents = documents.map(Document.init)
+        self.folders = folders.map(Folder.init)
+    }
+}
+
 enum SyncError: LocalizedError {
     case notAuthenticated
     case invalidRemotePath
@@ -83,5 +131,47 @@ final class SyncService {
             restored.append(document)
         }
         return RestoreSummary(restored: restored, conflicts: conflicts)
+    }
+
+    func backupMetadata(
+        documents: [LibraryDocument],
+        folders: [LibraryFolder],
+        repository: String
+    ) async throws {
+        guard GitHubService.shared.isAuthenticated else { throw SyncError.notAuthenticated }
+        let manifest = LibraryBackupManifest(documents: documents, folders: folders)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(manifest)
+        _ = try await GitHubService.shared.commit(
+            data: data,
+            repository: repository,
+            path: LibraryBackupManifest.path,
+            message: "Backup library metadata"
+        )
+    }
+
+    func restoreMetadata(repository: String) async throws -> LibraryBackupManifest? {
+        guard GitHubService.shared.isAuthenticated else { throw SyncError.notAuthenticated }
+        guard let data = try await GitHubService.shared.downloadIfExists(
+            repository: repository,
+            path: LibraryBackupManifest.path
+        ) else {
+            return nil
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(LibraryBackupManifest.self, from: data)
+    }
+
+    func apply(_ manifest: LibraryBackupManifest, to documents: [LibraryDocument]) {
+        let metadataByID = Dictionary(uniqueKeysWithValues: manifest.documents.map { ($0.id, $0) })
+        for document in documents {
+            guard let metadata = metadataByID[document.id] else { continue }
+            document.tags = metadata.tags
+            document.folderID = metadata.folderID
+            document.isFavorite = metadata.isFavorite
+        }
     }
 }

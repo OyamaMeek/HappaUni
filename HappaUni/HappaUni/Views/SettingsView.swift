@@ -5,6 +5,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query private var documents: [LibraryDocument]
+    @Query private var folders: [LibraryFolder]
     @AppStorage("aiConfigured") private var aiConfigured = false
     @AppStorage("ai.baseURL") private var aiBaseURL = "https://api.openai.com/v1"
     @AppStorage("ai.model") private var aiModel = "gpt-4o-mini"
@@ -14,6 +15,7 @@ struct SettingsView: View {
     @State private var githubToken = ""
     @State private var isConnectingGitHub = false
     @State private var isRestoring = false
+    @State private var isBackingUpMetadata = false
     @State private var cacheSize = "0 KB"
     @State private var message: String?
 
@@ -56,6 +58,16 @@ struct SettingsView: View {
                     .disabled(isConnectingGitHub)
                     if githubConnected {
                         Button {
+                            backupMetadataToGitHub()
+                        } label: {
+                            HStack {
+                                Text("备份资料库元数据")
+                                Spacer()
+                                if isBackingUpMetadata { ProgressView() }
+                            }
+                        }
+                        .disabled(isBackingUpMetadata)
+                        Button {
                             restoreFromGitHub()
                         } label: {
                             HStack {
@@ -67,7 +79,7 @@ struct SettingsView: View {
                         .disabled(isRestoring)
                         Button("断开 GitHub", role: .destructive, action: disconnectGitHub)
                     }
-                    Text("连接后，打开未同步的本地文档会自动备份到仓库；换设备后可从仓库恢复。")
+                    Text("连接后，打开未同步的本地文档会自动备份到仓库；可同时备份文件夹、标签和资料状态，换设备后恢复。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -153,18 +165,51 @@ struct SettingsView: View {
         Task {
             defer { isRestoring = false }
             do {
+                let metadata = try await SyncService.shared.restoreMetadata(repository: repository)
                 let summary = try await SyncService.shared.restoreDocuments(repository: repository, existingDocuments: documents)
                 for document in summary.restored {
                     modelContext.insert(document)
                 }
-                if !summary.restored.isEmpty {
+                if let metadata {
+                    let existingFolderIDs = Set(folders.map(\.id))
+                    for folder in metadata.folders where !existingFolderIDs.contains(folder.id) {
+                        modelContext.insert(
+                            LibraryFolder(
+                                id: folder.id,
+                                name: folder.name,
+                                parentID: folder.parentID,
+                                createdAt: folder.createdAt
+                            )
+                        )
+                    }
+                    SyncService.shared.apply(metadata, to: documents + summary.restored)
+                }
+                if !summary.restored.isEmpty || metadata != nil {
                     try modelContext.save()
                 }
                 var result = "已恢复 \(summary.restored.count) 份资料。"
+                if metadata != nil { result += " 已恢复文件夹和标签。"}
                 if !summary.conflicts.isEmpty {
                     result += " \(summary.conflicts.count) 份本地修改资料已保留。"
                 }
                 message = result
+            } catch {
+                message = error.localizedDescription
+            }
+        }
+    }
+
+    private func backupMetadataToGitHub() {
+        isBackingUpMetadata = true
+        Task {
+            defer { isBackingUpMetadata = false }
+            do {
+                try await SyncService.shared.backupMetadata(
+                    documents: documents,
+                    folders: folders,
+                    repository: repository
+                )
+                message = "资料库元数据已备份到 GitHub。"
             } catch {
                 message = error.localizedDescription
             }

@@ -154,6 +154,25 @@ struct HappaUniTests {
         #expect(item.sha == "abc123")
     }
 
+    @Test("Library metadata backup retains document and folder relationships")
+    func retainsMetadataBackupRelationships() {
+        let folder = LibraryFolder(name: "课程")
+        let document = LibraryDocument(
+            name: "guide.pdf",
+            url: URL(fileURLWithPath: "/tmp/guide.pdf"),
+            size: 10,
+            isFavorite: true,
+            tags: ["数学"],
+            folderID: folder.id
+        )
+        let manifest = LibraryBackupManifest(documents: [document], folders: [folder])
+
+        #expect(manifest.schemaVersion == 1)
+        #expect(manifest.documents[0].folderID == folder.id)
+        #expect(manifest.documents[0].tags == ["数学"])
+        #expect(manifest.folders[0].name == "课程")
+    }
+
     @Test("WebDAV cache keeps distinct remote files with the same filename")
     func cachesDistinctRemoteFiles() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
