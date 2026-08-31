@@ -5,14 +5,23 @@ struct AddWebDAVAccountView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
 
-    @State private var name = ""
-    @State private var serverAddress = ""
-    @State private var username = ""
-    @State private var password = ""
+    private let account: WebDAVAccount?
+    @State private var name: String
+    @State private var serverAddress: String
+    @State private var username: String
+    @State private var password: String
     @State private var isTesting = false
     @State private var isSaving = false
     @State private var statusMessage: String?
     @State private var errorMessage: String?
+
+    init(account: WebDAVAccount? = nil) {
+        self.account = account
+        _name = State(initialValue: account?.name ?? "")
+        _serverAddress = State(initialValue: account?.serverAddress ?? "")
+        _username = State(initialValue: account?.username ?? "")
+        _password = State(initialValue: "")
+    }
 
     var body: some View {
         NavigationStack {
@@ -28,7 +37,7 @@ struct AddWebDAVAccountView: View {
                     TextField("用户名", text: $username)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    SecureField("密码或应用专用密码", text: $password)
+                    SecureField(account == nil ? "密码或应用专用密码" : "新密码（留空则保持不变）", text: $password)
                 }
                 Section {
                     Button {
@@ -50,7 +59,7 @@ struct AddWebDAVAccountView: View {
                     Text("密码仅保存在本机钥匙串，不会写入资料库数据库。")
                 }
             }
-            .navigationTitle("添加 WebDAV")
+            .navigationTitle(account == nil ? "添加 WebDAV" : "编辑 WebDAV")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
@@ -81,7 +90,8 @@ struct AddWebDAVAccountView: View {
         Task {
             do {
                 let url = try input.validatedURL()
-                try input.validateCredentials()
+                let password = try effectivePassword()
+                try input.validateCredentials(with: password)
                 try await WebDAVService().testConnection(url: url, username: username, password: password)
                 statusMessage = "连接成功"
             } catch {
@@ -94,28 +104,46 @@ struct AddWebDAVAccountView: View {
     private func save() {
         isSaving = true
         Task {
-            var account: WebDAVAccount?
+            var newAccount: WebDAVAccount?
             do {
                 let accountName = try input.validatedName()
                 let url = try input.validatedURL()
-                try input.validateCredentials()
-                let newAccount = WebDAVAccount(name: accountName, serverAddress: url.absoluteString, username: username)
-                account = newAccount
-                try KeychainStore().save(password, for: newAccount.passwordKey)
+                let password = try effectivePassword()
+                try input.validateCredentials(with: password)
                 try await WebDAVService.shared.ensureDirectory(
                     serverURL: url,
                     username: username,
                     password: password,
                     path: WebDAVRemotePath.libraryRoot
                 )
-                modelContext.insert(newAccount)
+                if let account {
+                    account.name = accountName
+                    account.serverAddress = url.absoluteString
+                    account.username = username
+                    if !self.password.isEmpty {
+                        try KeychainStore().save(password, for: account.passwordKey)
+                    }
+                } else {
+                    let account = WebDAVAccount(name: accountName, serverAddress: url.absoluteString, username: username)
+                    newAccount = account
+                    try KeychainStore().save(password, for: account.passwordKey)
+                    modelContext.insert(account)
+                }
                 try modelContext.save()
                 dismiss()
             } catch {
-                if let account { try? KeychainStore().delete(account.passwordKey) }
+                if let newAccount { try? KeychainStore().delete(newAccount.passwordKey) }
                 errorMessage = error.localizedDescription
             }
             isSaving = false
         }
+    }
+
+    private func effectivePassword() throws -> String {
+        if !password.isEmpty { return password }
+        if let account, let savedPassword = try KeychainStore().value(for: account.passwordKey), !savedPassword.isEmpty {
+            return savedPassword
+        }
+        throw WebDAVAccountInputError.missingCredentials
     }
 }

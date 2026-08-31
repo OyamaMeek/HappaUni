@@ -15,6 +15,7 @@ struct ContentView: View {
     @State private var isShowingSettings = false
     @State private var isShowingAddWebDAV = false
     @State private var browsingWebDAVAccount: WebDAVAccount?
+    @State private var editingWebDAVAccount: WebDAVAccount?
     @State private var editingDocument: LibraryDocument?
     @State private var errorMessage: String?
     @State private var searchText = ""
@@ -45,9 +46,13 @@ struct ContentView: View {
                 .navigationTitle("资料库")
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
-                        Button { isImporting = true } label: {
-                            Label("导入文件", systemImage: "plus")
-                        }
+                        LibraryAddMenu(
+                            onImport: { isImporting = true },
+                            onCreateFolder: {
+                                newFolderParentID = selectedFolderID
+                                isShowingAddFolder = true
+                            }
+                        )
                     }
                 }
         } detail: {
@@ -80,6 +85,9 @@ struct ContentView: View {
         }
         .sheet(isPresented: $isShowingAddWebDAV) {
             AddWebDAVAccountView()
+        }
+        .sheet(item: $editingWebDAVAccount) { account in
+            AddWebDAVAccountView(account: account)
         }
         .sheet(item: $browsingWebDAVAccount) { account in
             WebDAVBrowserView(account: account)
@@ -137,6 +145,11 @@ struct ContentView: View {
                         }
                     }
                     .contextMenu {
+                        Button {
+                            editingWebDAVAccount = account
+                        } label: {
+                            Label("编辑服务器", systemImage: "pencil")
+                        }
                         Button(role: .destructive) {
                             delete(account)
                         } label: {
@@ -209,13 +222,13 @@ struct ContentView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             HStack(spacing: 0) {
                 Button {
-                    newFolderParentID = selectedFolderID
-                    isShowingAddFolder = true
+                    selectedFolderID = nil
+                    searchText = ""
                 } label: {
                     VStack(spacing: 6) {
-                        Image(systemName: "folder.badge.plus")
+                        Image(systemName: "books.vertical.fill")
                             .font(.title3.weight(.semibold))
-                        Text("新建文件夹")
+                        Text("资料库")
                             .font(.caption.weight(.medium))
                     }
                     .frame(maxWidth: .infinity)
@@ -326,6 +339,81 @@ struct ContentView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+}
+
+private struct LibraryAddMenu: View {
+    let onImport: () -> Void
+    let onCreateFolder: () -> Void
+
+    @State private var isPresented = false
+
+    var body: some View {
+        Button {
+            isPresented.toggle()
+        } label: {
+            Image(systemName: "plus")
+                .font(.headline.weight(.semibold))
+                .frame(width: 40, height: 40)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay {
+                    Circle()
+                        .stroke(.white.opacity(0.24), lineWidth: 1)
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("资料库操作")
+        .popover(isPresented: $isPresented, arrowEdge: .top) {
+            HStack(spacing: 10) {
+                actionButton(
+                    title: "导入",
+                    systemImage: "square.and.arrow.down",
+                    action: onImport
+                )
+                actionButton(
+                    title: "新建文件夹",
+                    systemImage: "folder.badge.plus",
+                    action: onCreateFolder
+                )
+            }
+            .padding(10)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay {
+                Capsule()
+                    .stroke(
+                        LinearGradient(
+                            colors: [.white.opacity(0.48), .white.opacity(0.08)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 1
+                    )
+            }
+            .shadow(color: .black.opacity(0.22), radius: 16, y: 8)
+            .presentationCompactAdaptation(.popover)
+        }
+    }
+
+    @ViewBuilder
+    private func actionButton(title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button {
+            isPresented = false
+            action()
+        } label: {
+            VStack(spacing: 7) {
+                Image(systemName: systemImage)
+                    .font(.title3.weight(.semibold))
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+            }
+            .frame(minWidth: 72)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 10)
+            .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
     }
 }
 

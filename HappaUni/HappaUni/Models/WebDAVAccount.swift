@@ -23,9 +23,9 @@ struct WebDAVAccountInput: Equatable {
         return url
     }
 
-    func validateCredentials() throws {
+    func validateCredentials(with password: String? = nil) throws {
         guard !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              !password.isEmpty else {
+              !(password ?? self.password).isEmpty else {
             throw WebDAVAccountInputError.missingCredentials
         }
     }
