@@ -92,6 +92,19 @@ struct HappaUniTests {
         #expect(document.formattedSize == "1.5 KB")
     }
 
+    @Test("Documents are active until explicitly archived")
+    func archivesDocument() {
+        let document = LibraryDocument(
+            name: "paper.pdf",
+            url: URL(fileURLWithPath: "/tmp/paper.pdf"),
+            size: 10
+        )
+
+        #expect(!document.isArchived)
+        document.isArchived = true
+        #expect(document.isArchived)
+    }
+
     @Test("Importing a downloaded file can preserve its remote filename")
     func preservesPreferredImportedFilename() throws {
         let sourceURL = FileManager.default.temporaryDirectory

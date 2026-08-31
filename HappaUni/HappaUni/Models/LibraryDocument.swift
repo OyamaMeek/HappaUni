@@ -62,6 +62,7 @@ final class LibraryDocument {
     var gitCommitHash: String?
     var gitLastSyncAt: Date?
     var isFavorite: Bool
+    var isArchived: Bool = false
     var tagsRawValue: String
     var folderID: UUID?
 
@@ -75,6 +76,7 @@ final class LibraryDocument {
         modifiedAt: Date = .now,
         isSyncedToGitHub: Bool = false,
         isFavorite: Bool = false,
+        isArchived: Bool = false,
         tags: [String] = [],
         folderID: UUID? = nil
     ) {
@@ -87,6 +89,7 @@ final class LibraryDocument {
         self.modifiedAt = modifiedAt
         self.isSyncedToGitHub = isSyncedToGitHub
         self.isFavorite = isFavorite
+        self.isArchived = isArchived
         self.tagsRawValue = Self.normalizedTags(tags).joined(separator: "\u{1F}")
         self.folderID = folderID
     }

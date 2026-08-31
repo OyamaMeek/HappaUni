@@ -6,8 +6,25 @@ struct PDFDocumentState: Equatable {
     let currentPage: Int
     let zoomScale: CGFloat
     let searchMatchCount: Int
+    let errorMessage: String?
 
-    static let empty = PDFDocumentState(pageCount: 0, currentPage: 0, zoomScale: 1, searchMatchCount: 0)
+    static let empty = PDFDocumentState(
+        pageCount: 0,
+        currentPage: 0,
+        zoomScale: 1,
+        searchMatchCount: 0,
+        errorMessage: nil
+    )
+
+    static func failed(_ message: String) -> PDFDocumentState {
+        PDFDocumentState(
+            pageCount: 0,
+            currentPage: 0,
+            zoomScale: 1,
+            searchMatchCount: 0,
+            errorMessage: message
+        )
+    }
 }
 
 enum PDFService {
@@ -23,7 +40,8 @@ enum PDFService {
             pageCount: document.pageCount,
             currentPage: pageIndex.map { $0 + 1 } ?? (document.pageCount > 0 ? 1 : 0),
             zoomScale: zoomScale,
-            searchMatchCount: searchMatchCount
+            searchMatchCount: searchMatchCount,
+            errorMessage: nil
         )
     }
 }

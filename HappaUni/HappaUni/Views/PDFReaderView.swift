@@ -28,8 +28,12 @@ struct PDFReaderView: View {
                 }
                 .disabled(state.currentPage <= 1)
 
-                Text(state.pageCount == 0 ? "正在加载" : "\(state.currentPage) / \(state.pageCount)")
+                Text(
+                    state.errorMessage
+                    ?? (state.pageCount == 0 ? "正在加载" : "\(state.currentPage) / \(state.pageCount)")
+                )
                     .font(.subheadline.monospacedDigit())
+                    .lineLimit(1)
                     .frame(minWidth: 68)
 
                 Button {
@@ -132,8 +136,29 @@ private struct PDFKitDocumentView: UIViewRepresentable {
 
         func load(url: URL, into view: PDFView) {
             loadedURL = url
-            view.document = PDFDocument(url: url)
-            publish(from: view)
+            view.document = nil
+            state = .empty
+
+            DispatchQueue.global(qos: .userInitiated).async { [weak self, weak view] in
+                let document: PDFDocument? = autoreleasepool {
+                    guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else {
+                        return nil
+                    }
+                    return PDFDocument(data: data)
+                }
+
+                DispatchQueue.main.async {
+                    guard let self, let view, self.loadedURL == url else { return }
+                    guard let document, document.pageCount > 0 else {
+                        self.state = .failed("无法加载 PDF")
+                        return
+                    }
+
+                    view.document = document
+                    view.autoScales = true
+                    self.publish(from: view)
+                }
+            }
         }
 
         func updateSearch(_ searchText: String, in view: PDFView) {

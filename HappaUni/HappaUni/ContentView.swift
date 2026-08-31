@@ -26,10 +26,12 @@ struct ContentView: View {
     private var folderNodes: [FolderTreeNode] { FolderTreeBuilder.make(from: folders) }
     private var filteredDocuments: [LibraryDocument] {
         documents.filter { document in
-            searchText.isEmpty
-                || document.name.localizedCaseInsensitiveContains(searchText)
-                || document.tags.contains { $0.localizedCaseInsensitiveContains(searchText) }
+            !document.isArchived && matchesSearch(document)
         }
+    }
+
+    private var archivedDocuments: [LibraryDocument] {
+        documents.filter { $0.isArchived && matchesSearch($0) }
     }
 
     private var selectedDocument: LibraryDocument? {
@@ -178,11 +180,20 @@ struct ContentView: View {
                         isShowingAddFolder = true
                     },
                     onDeleteFolder: deleteFolder,
+                    onArchiveDocument: archive,
                     onDeleteDocument: delete
                 )
 
                 ForEach(filteredDocuments.filter { $0.folderID == nil }) { document in
                     documentRow(document)
+                }
+            }
+
+            if !archivedDocuments.isEmpty {
+                Section("归档") {
+                    ForEach(archivedDocuments) { document in
+                        documentRow(document)
+                    }
                 }
             }
         }
@@ -240,20 +251,19 @@ struct ContentView: View {
     }
 
     private func documentRow(_ document: LibraryDocument) -> some View {
-        DocumentRow(document: document)
+        LibrarySidebarDocumentRow(
+            document: document,
+            editingDocument: $editingDocument,
+            onArchive: archive,
+            onDelete: delete
+        )
             .tag(document.persistentModelID)
-            .contextMenu {
-                Button {
-                    editingDocument = document
-                } label: {
-                    Label("编辑标签", systemImage: "tag")
-                }
-                Button(role: .destructive) {
-                    delete(document)
-                } label: {
-                    Label("删除", systemImage: "trash")
-                }
-            }
+    }
+
+    private func matchesSearch(_ document: LibraryDocument) -> Bool {
+        searchText.isEmpty
+            || document.name.localizedCaseInsensitiveContains(searchText)
+            || document.tags.contains { $0.localizedCaseInsensitiveContains(searchText) }
     }
 
     private func importFiles(_ result: Result<[URL], Error>) {
@@ -301,6 +311,19 @@ struct ContentView: View {
         }
     }
 
+    private func archive(_ document: LibraryDocument) {
+        do {
+            document.isArchived.toggle()
+            document.modifiedAt = .now
+            if document.isArchived && selectedDocumentID == document.persistentModelID {
+                selectedDocumentID = nil
+            }
+            try modelContext.save()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     private func deleteFolder(_ folder: LibraryFolder) {
         do {
             for document in documents where document.folderID == folder.id {
@@ -336,6 +359,7 @@ private struct FolderTreeRows: View {
     @Binding var editingDocument: LibraryDocument?
     let onAddSubfolder: (LibraryFolder) -> Void
     let onDeleteFolder: (LibraryFolder) -> Void
+    let onArchiveDocument: (LibraryDocument) -> Void
     let onDeleteDocument: (LibraryDocument) -> Void
 
     var body: some View {
@@ -345,6 +369,7 @@ private struct FolderTreeRows: View {
                     LibrarySidebarDocumentRow(
                         document: document,
                         editingDocument: $editingDocument,
+                        onArchive: onArchiveDocument,
                         onDelete: onDeleteDocument
                     )
                     .tag(document.persistentModelID)
@@ -357,6 +382,7 @@ private struct FolderTreeRows: View {
                     editingDocument: $editingDocument,
                     onAddSubfolder: onAddSubfolder,
                     onDeleteFolder: onDeleteFolder,
+                    onArchiveDocument: onArchiveDocument,
                     onDeleteDocument: onDeleteDocument
                 )
             } label: {
@@ -389,6 +415,7 @@ private struct FolderTreeRows: View {
 private struct LibrarySidebarDocumentRow: View {
     let document: LibraryDocument
     @Binding var editingDocument: LibraryDocument?
+    let onArchive: (LibraryDocument) -> Void
     let onDelete: (LibraryDocument) -> Void
 
     var body: some View {
@@ -398,6 +425,14 @@ private struct LibrarySidebarDocumentRow: View {
                     editingDocument = document
                 } label: {
                     Label("编辑标签", systemImage: "tag")
+                }
+                Button {
+                    onArchive(document)
+                } label: {
+                    Label(
+                        document.isArchived ? "取消归档" : "归档",
+                        systemImage: document.isArchived ? "tray.and.arrow.up" : "archivebox"
+                    )
                 }
                 Button(role: .destructive) {
                     onDelete(document)
@@ -413,6 +448,7 @@ private struct LibraryAddMenu: View {
     let onCreateFolder: () -> Void
 
     @State private var isPresented = false
+    @State private var pendingAction: (() -> Void)?
 
     var body: some View {
         Button {
@@ -461,13 +497,18 @@ private struct LibraryAddMenu: View {
             .shadow(color: .black.opacity(0.22), radius: 16, y: 8)
             .presentationCompactAdaptation(.popover)
         }
+        .onChange(of: isPresented) { _, isVisible in
+            guard !isVisible, let action = pendingAction else { return }
+            pendingAction = nil
+            DispatchQueue.main.async(execute: action)
+        }
     }
 
     @ViewBuilder
     private func actionButton(title: String, systemImage: String, action: @escaping () -> Void) -> some View {
         Button {
+            pendingAction = action
             isPresented = false
-            action()
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: systemImage)
