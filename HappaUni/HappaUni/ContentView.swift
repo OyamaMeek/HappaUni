@@ -18,7 +18,6 @@ struct ContentView: View {
     @State private var editingDocument: LibraryDocument?
     @State private var errorMessage: String?
     @State private var searchText = ""
-    @State private var favoritesOnly = false
     @State private var selectedFolderID: UUID?
     @State private var isShowingAddFolder = false
     @State private var newFolderParentID: UUID?
@@ -27,10 +26,9 @@ struct ContentView: View {
 
     private var filteredDocuments: [LibraryDocument] {
         documents.filter { document in
-            let matchesFavorite = !favoritesOnly || document.isFavorite
             let matchesFolder = selectedFolderID == nil || document.folderID == selectedFolderID
             let matchesSearch = searchText.isEmpty || document.name.localizedCaseInsensitiveContains(searchText) || document.tags.contains { $0.localizedCaseInsensitiveContains(searchText) }
-            return matchesFavorite && matchesFolder && matchesSearch
+            return matchesFolder && matchesSearch
         }
     }
 
@@ -46,20 +44,6 @@ struct ContentView: View {
                     ToolbarItem(placement: .topBarLeading) {
                         Button { isImporting = true } label: {
                             Label("导入文件", systemImage: "plus")
-                        }
-                    }
-                    ToolbarItemGroup(placement: .topBarTrailing) {
-                        Button { favoritesOnly.toggle() } label: {
-                            Label(favoritesOnly ? "显示全部" : "仅收藏", systemImage: favoritesOnly ? "star.fill" : "star")
-                        }
-                        Button {
-                            newFolderParentID = selectedFolderID
-                            isShowingAddFolder = true
-                        } label: {
-                            Label("新建文件夹", systemImage: "folder.badge.plus")
-                        }
-                        Button { isShowingSettings = true } label: {
-                            Label("设置", systemImage: "gearshape")
                         }
                     }
                 }
@@ -200,12 +184,6 @@ struct ContentView: View {
                             .tag(document.persistentModelID)
                             .contextMenu {
                                 Button {
-                                    document.isFavorite.toggle()
-                                    saveDocumentChanges()
-                                } label: {
-                                    Label(document.isFavorite ? "取消收藏" : "收藏", systemImage: document.isFavorite ? "star.slash" : "star")
-                                }
-                                Button {
                                     editingDocument = document
                                 } label: {
                                     Label("编辑标签", systemImage: "tag")
@@ -223,6 +201,32 @@ struct ContentView: View {
         }
         .searchable(text: $searchText, prompt: "搜索文件")
         .listStyle(.sidebar)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            HStack(spacing: 12) {
+                Button {
+                    newFolderParentID = selectedFolderID
+                    isShowingAddFolder = true
+                } label: {
+                    Label("新建文件夹", systemImage: "folder.badge.plus")
+                }
+
+                Spacer(minLength: 0)
+
+                Button {
+                    isShowingSettings = true
+                } label: {
+                    Label("设置", systemImage: "gearshape")
+                }
+            }
+            .labelStyle(.iconOnly)
+            .font(.title3)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+            .background(.ultraThinMaterial)
+            .overlay(alignment: .top) {
+                Divider()
+            }
+        }
     }
 
     private func importFiles(_ result: Result<[URL], Error>) {
@@ -251,14 +255,6 @@ struct ContentView: View {
             try FileService().delete(document)
             if selectedDocumentID == document.persistentModelID { selectedDocumentID = nil }
             modelContext.delete(document)
-            try modelContext.save()
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-
-    private func saveDocumentChanges() {
-        do {
             try modelContext.save()
         } catch {
             errorMessage = error.localizedDescription
@@ -378,15 +374,8 @@ private struct DocumentRow: View {
     var body: some View {
         Label {
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
-                    Text(document.name)
-                        .lineLimit(1)
-                    if document.isFavorite {
-                        Image(systemName: "star.fill")
-                            .font(.caption)
-                            .foregroundStyle(.yellow)
-                    }
-                }
+                Text(document.name)
+                    .lineLimit(1)
                 Text("\(document.type.displayName) · \(document.formattedSize)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
