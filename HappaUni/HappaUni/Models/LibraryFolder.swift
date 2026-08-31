@@ -26,11 +26,32 @@ struct FolderTreeNode: Identifiable {
 enum FolderTreeBuilder {
     static func make(from folders: [LibraryFolder]) -> [FolderTreeNode] {
         let grouped = Dictionary(grouping: folders, by: \LibraryFolder.parentID)
-        func nodes(parentID: UUID?) -> [FolderTreeNode] {
+        func nodes(parentID: UUID?, ancestors: Set<UUID>) -> [FolderTreeNode] {
             (grouped[parentID] ?? [])
                 .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-                .map { FolderTreeNode(folder: $0, children: nodes(parentID: $0.id)) }
+                .compactMap { folder in
+                    guard !ancestors.contains(folder.id) else { return nil }
+                    return FolderTreeNode(
+                        folder: folder,
+                        children: nodes(parentID: folder.id, ancestors: ancestors.union([folder.id]))
+                    )
+                }
         }
-        return nodes(parentID: nil)
+        return nodes(parentID: nil, ancestors: [])
+    }
+
+    static func descendantIDs(of rootID: UUID, in folders: [LibraryFolder]) -> Set<UUID> {
+        let children = Dictionary(grouping: folders, by: \LibraryFolder.parentID)
+        var visited: Set<UUID> = []
+
+        func visit(_ id: UUID) {
+            guard visited.insert(id).inserted else { return }
+            for child in children[id] ?? [] {
+                visit(child.id)
+            }
+        }
+
+        visit(rootID)
+        return visited
     }
 }

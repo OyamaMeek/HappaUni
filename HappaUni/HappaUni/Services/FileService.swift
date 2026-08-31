@@ -1,5 +1,23 @@
 import Foundation
 
+struct ImportedLocalFile {
+    let url: URL
+    let type: DocumentType
+    let size: Int64
+    let modifiedAt: Date
+
+    func makeDocument(folderID: UUID? = nil) -> LibraryDocument {
+        LibraryDocument(
+            name: url.lastPathComponent,
+            url: url,
+            type: type,
+            size: size,
+            modifiedAt: modifiedAt,
+            folderID: folderID
+        )
+    }
+}
+
 struct FileService {
     enum FileServiceError: LocalizedError {
         case documentsDirectoryUnavailable
@@ -13,27 +31,62 @@ struct FileService {
         }
     }
 
-    static let supportedTypes: Set<DocumentType> = [.pdf, .markdown, .epub, .text, .image]
+    static let supportedTypes: Set<DocumentType> = [.pdf, .markdown, .tex, .epub, .text, .image]
 
     func importDocument(from sourceURL: URL) throws -> LibraryDocument {
-        let type = DocumentType.detect(from: sourceURL.lastPathComponent)
-        guard Self.supportedTypes.contains(type) else { throw FileServiceError.unsupportedFile }
+        let importedFile = try importFiles([sourceURL], into: libraryDirectory())[0]
+        return importedFile.makeDocument()
+    }
 
-        let directory = try libraryDirectory()
-        let destination = uniqueURL(in: directory, filename: sourceURL.lastPathComponent)
-        try FileManager.default.copyItem(at: sourceURL, to: destination)
+    func importFiles(_ sourceURLs: [URL], into directory: URL) throws -> [ImportedLocalFile] {
+        guard !sourceURLs.isEmpty else { return [] }
 
-        let attributes = try FileManager.default.attributesOfItem(atPath: destination.path)
-        let size = (attributes[.size] as? NSNumber)?.int64Value ?? 0
-        let modifiedAt = (attributes[.modificationDate] as? Date) ?? .now
+        let fileManager = FileManager.default
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        let temporaryDirectory = directory.appendingPathComponent(".import-\(UUID().uuidString)", isDirectory: true)
+        var committedURLs: [URL] = []
 
-        return LibraryDocument(
-            name: destination.lastPathComponent,
-            url: destination,
-            type: type,
-            size: size,
-            modifiedAt: modifiedAt
-        )
+        do {
+            try fileManager.createDirectory(at: temporaryDirectory, withIntermediateDirectories: false)
+            var stagedFiles: [(url: URL, type: DocumentType)] = []
+
+            for sourceURL in sourceURLs {
+                let type = DocumentType.detect(from: sourceURL.lastPathComponent)
+                guard Self.supportedTypes.contains(type) else { throw FileServiceError.unsupportedFile }
+
+                let stagedURL = uniqueURL(in: temporaryDirectory, filename: sourceURL.lastPathComponent)
+                try fileManager.copyItem(at: sourceURL, to: stagedURL)
+                stagedFiles.append((url: stagedURL, type: type))
+            }
+
+            var importedFiles: [ImportedLocalFile] = []
+            for stagedFile in stagedFiles {
+                let destinationURL = uniqueURL(in: directory, filename: stagedFile.url.lastPathComponent)
+                try fileManager.moveItem(at: stagedFile.url, to: destinationURL)
+                committedURLs.append(destinationURL)
+
+                let attributes = try fileManager.attributesOfItem(atPath: destinationURL.path)
+                let size = (attributes[.size] as? NSNumber)?.int64Value ?? 0
+                let modifiedAt = (attributes[.modificationDate] as? Date) ?? .now
+                importedFiles.append(
+                    ImportedLocalFile(
+                        url: destinationURL,
+                        type: stagedFile.type,
+                        size: size,
+                        modifiedAt: modifiedAt
+                    )
+                )
+            }
+
+            try fileManager.removeItem(at: temporaryDirectory)
+            return importedFiles
+        } catch {
+            for url in committedURLs {
+                try? fileManager.removeItem(at: url)
+            }
+            try? fileManager.removeItem(at: temporaryDirectory)
+            throw error
+        }
     }
 
     func restoreDocument(data: Data, filename: String, id: UUID, gitSHA: String) throws -> LibraryDocument {

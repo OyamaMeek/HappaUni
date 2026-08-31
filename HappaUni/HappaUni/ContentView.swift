@@ -23,10 +23,13 @@ struct ContentView: View {
     @State private var newFolderParentID: UUID?
 
     private var folderNodes: [FolderTreeNode] { FolderTreeBuilder.make(from: folders) }
+    private var selectedFolderDescendantIDs: Set<UUID>? {
+        selectedFolderID.map { FolderTreeBuilder.descendantIDs(of: $0, in: folders) }
+    }
 
     private var filteredDocuments: [LibraryDocument] {
         documents.filter { document in
-            let matchesFolder = selectedFolderID == nil || document.folderID == selectedFolderID
+            let matchesFolder = selectedFolderDescendantIDs.map { document.folderID.map($0.contains) ?? false } ?? true
             let matchesSearch = searchText.isEmpty || document.name.localizedCaseInsensitiveContains(searchText) || document.tags.contains { $0.localizedCaseInsensitiveContains(searchText) }
             return matchesFolder && matchesSearch
         }
@@ -58,7 +61,7 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .fileImporter(
             isPresented: $isImporting,
-            allowedContentTypes: [.pdf, .plainText, .utf8PlainText, .image, .epub],
+            allowedContentTypes: [.pdf, .plainText, .utf8PlainText, .image, .epub, Self.texContentType],
             allowsMultipleSelection: true
         ) { result in
             importFiles(result)
@@ -82,7 +85,7 @@ struct ContentView: View {
             WebDAVBrowserView(account: account)
         }
         .sheet(item: $editingDocument) { document in
-            DocumentMetadataEditor(document: document)
+            MetadataEditorView(document: document)
         }
         .sheet(isPresented: $isShowingAddFolder) {
             AddFolderView(parentID: newFolderParentID)
@@ -96,6 +99,8 @@ struct ContentView: View {
             Text(errorMessage ?? "")
         }
     }
+
+    private static let texContentType = UTType(filenameExtension: "tex") ?? .plainText
 
     private var sidebar: some View {
         List(selection: $selectedDocumentID) {
@@ -254,16 +259,29 @@ struct ContentView: View {
 
     private func importFiles(_ result: Result<[URL], Error>) {
         do {
-            for sourceURL in try result.get() {
-                let didAccess = sourceURL.startAccessingSecurityScopedResource()
-                defer {
-                    if didAccess { sourceURL.stopAccessingSecurityScopedResource() }
-                }
-                let document = try FileService().importDocument(from: sourceURL)
-                modelContext.insert(document)
-                selectedDocumentID = document.persistentModelID
+            let sourceURLs = try result.get()
+            let securityScopedURLs = sourceURLs.filter { $0.startAccessingSecurityScopedResource() }
+            defer {
+                securityScopedURLs.forEach { $0.stopAccessingSecurityScopedResource() }
             }
-            try modelContext.save()
+
+            let fileService = FileService()
+            let importedFiles = try fileService.importFiles(sourceURLs, into: fileService.libraryDirectory())
+            let importedDocuments = importedFiles.map { $0.makeDocument(folderID: selectedFolderID) }
+
+            for document in importedDocuments {
+                modelContext.insert(document)
+            }
+            do {
+                try modelContext.save()
+                selectedDocumentID = importedDocuments.last?.persistentModelID
+            } catch {
+                for importedFile in importedFiles {
+                    try? FileManager.default.removeItem(at: importedFile.url)
+                }
+                modelContext.rollback()
+                throw error
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -307,57 +325,6 @@ struct ContentView: View {
             try modelContext.save()
         } catch {
             errorMessage = error.localizedDescription
-        }
-    }
-}
-
-
-private struct DocumentMetadataEditor: View {
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var modelContext
-    @Bindable var document: LibraryDocument
-    @Query(sort: \LibraryFolder.name) private var folders: [LibraryFolder]
-    @State private var tagsText = ""
-    @State private var selectedFolderID: UUID?
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("标签") {
-                    TextField("用逗号分隔，例如：课程, 论文", text: $tagsText)
-                    Text("标签会参与资料库搜索。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                Section("文件夹") {
-                    Picker("位置", selection: $selectedFolderID) {
-                        Text("未分类").tag(UUID?.none)
-                        ForEach(folders) { folder in
-                            Text(folder.name).tag(Optional(folder.id))
-                        }
-                    }
-                }
-                Section("资料") {
-                    LabeledContent("类型", value: document.type.displayName)
-                    LabeledContent("大小", value: document.formattedSize)
-                }
-            }
-            .navigationTitle("资料信息")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") {
-                        document.tags = tagsText.split(separator: ",").map(String.init)
-                        document.folderID = selectedFolderID
-                        try? modelContext.save()
-                        dismiss()
-                    }
-                }
-            }
-            .task {
-                tagsText = document.tags.joined(separator: ", ")
-                selectedFolderID = document.folderID
-            }
         }
     }
 }
@@ -412,7 +379,7 @@ private struct DocumentRow: View {
     private var iconColor: Color {
         switch document.type {
         case .pdf: .red
-        case .markdown, .text: .blue
+        case .markdown, .tex, .text: .blue
         case .epub: .orange
         case .image: .purple
         case .other: .secondary

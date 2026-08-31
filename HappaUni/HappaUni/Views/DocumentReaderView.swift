@@ -12,7 +12,7 @@ struct DocumentReaderView: View {
             switch document.type {
             case .pdf:
                 PDFReader(url: document.url)
-            case .markdown, .text:
+            case .markdown, .tex, .text:
                 TextDocumentReader(url: document.url, title: document.name)
             case .image:
                 ImageDocumentReader(url: document.url)

@@ -11,6 +11,11 @@ struct HappaUniTests {
         #expect(DocumentType.detect(from: "archive.zip") == .other)
     }
 
+    @Test("Document type detects TeX source")
+    func detectsTeX() {
+        #expect(DocumentType.detect(from: "report.tex") == .tex)
+    }
+
     @Test("Document records expose a readable file size")
     func formatsFileSize() {
         let document = LibraryDocument(
@@ -103,5 +108,35 @@ struct HappaUniTests {
         #expect(nodes.count == 1)
         #expect(nodes[0].folder.id == root.id)
         #expect(nodes[0].children.map(\.folder.id) == [child.id])
+    }
+
+    @Test("Folder descendants include nested folders and exclude cycles")
+    func findsFolderDescendants() {
+        let root = LibraryFolder(name: "课程")
+        let child = LibraryFolder(name: "数学", parentID: root.id)
+        let grandchild = LibraryFolder(name: "高数", parentID: child.id)
+
+        #expect(FolderTreeBuilder.descendantIDs(of: root.id, in: [root, child, grandchild]) == [root.id, child.id, grandchild.id])
+    }
+
+    @Test("Atomic local imports remove copied files after a later copy fails")
+    func rollsBackPartialImport() throws {
+        let sourceDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let destinationDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: sourceDirectory)
+            try? FileManager.default.removeItem(at: destinationDirectory)
+        }
+
+        try FileManager.default.createDirectory(at: sourceDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
+        let validSource = sourceDirectory.appendingPathComponent("first.txt")
+        let missingSource = sourceDirectory.appendingPathComponent("missing.txt")
+        try Data("first".utf8).write(to: validSource)
+
+        #expect(throws: Error.self) {
+            try FileService().importFiles([validSource, missingSource], into: destinationDirectory)
+        }
+        #expect(try FileManager.default.contentsOfDirectory(atPath: destinationDirectory.path).isEmpty)
     }
 }
