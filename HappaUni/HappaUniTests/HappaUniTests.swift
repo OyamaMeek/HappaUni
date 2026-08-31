@@ -203,6 +203,21 @@ struct HappaUniTests {
         #expect(cache.cachedURL(accountID: secondAccount, remotePath: "/notes/guide.pdf") == second)
     }
 
+    @Test("WebDAV upload queue deduplicates an unchanged pending upload")
+    func deduplicatesQueuedWebDAVUploads() {
+        let suiteName = "HappaUniTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let queue = WebDAVUploadQueue(defaults: defaults)
+        let accountID = UUID()
+        let localURL = URL(fileURLWithPath: "/tmp/guide.pdf")
+
+        queue.enqueue(accountID: accountID, localURL: localURL, remotePath: "/notes/guide.pdf")
+        queue.enqueue(accountID: accountID, localURL: localURL, remotePath: "/notes/guide.pdf")
+
+        #expect(queue.items(for: accountID).count == 1)
+    }
+
     @Test("WebDAV request URLs preserve server base path and absolute DAV hrefs")
     func resolvesWebDAVRequestURLs() {
         let serverURL = URL(string: "https://dav.example.com/root/dav/")!

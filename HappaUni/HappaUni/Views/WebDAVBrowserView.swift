@@ -81,7 +81,10 @@ struct WebDAVBrowserView: View {
             .sheet(isPresented: $isShowingUpload) {
                 WebDAVUploadView(account: account, path: path) { loadFiles() }
             }
-            .task { loadFiles() }
+            .task {
+                loadFiles()
+                await resumeQueuedUploads()
+            }
             .alert("新建文件夹", isPresented: $isShowingNewFolder) {
                 TextField("文件夹名称", text: $newFolderName)
                 Button("取消", role: .cancel) { newFolderName = "" }
@@ -218,6 +221,32 @@ struct WebDAVBrowserView: View {
         }
     }
 
+    private func resumeQueuedUploads() async {
+        guard let serverURL = account.serverURL,
+              let password = try? KeychainStore().value(for: account.passwordKey) else {
+            return
+        }
+
+        let queue = WebDAVUploadQueue.shared
+        for upload in queue.items(for: account.id) {
+            guard FileManager.default.fileExists(atPath: upload.localPath) else {
+                queue.remove(upload.id)
+                continue
+            }
+            do {
+                try await WebDAVService.shared.upload(
+                    data: Data(contentsOf: upload.localURL),
+                    to: WebDAVRemotePath.url(serverURL: serverURL, path: upload.remotePath),
+                    username: account.username,
+                    password: password
+                )
+                queue.remove(upload.id)
+            } catch {
+                queue.markAttempt(upload.id)
+            }
+        }
+    }
+
     private enum BrowserError: LocalizedError {
         case missingPassword
         var errorDescription: String? { "找不到此服务器的密码，请重新添加账户。" }
@@ -288,12 +317,12 @@ private struct WebDAVUploadView: View {
 
     private func upload(_ document: LibraryDocument) {
         guard let serverURL = account.serverURL else { errorMessage = "服务器地址无效。"; return }
+        let remotePath = WebDAVRemotePath.join(base: path, child: document.name)
         uploadingID = document.id
         Task {
             defer { uploadingID = nil }
             do {
                 guard let password = try KeychainStore().value(for: account.passwordKey) else { throw UploadError.missingPassword }
-                let remotePath = WebDAVRemotePath.join(base: path, child: document.name)
                 try await WebDAVService.shared.upload(
                     data: Data(contentsOf: document.url),
                     to: WebDAVRemotePath.url(serverURL: serverURL, path: remotePath),
@@ -303,7 +332,12 @@ private struct WebDAVUploadView: View {
                 onUploaded()
                 dismiss()
             } catch {
-                errorMessage = error.localizedDescription
+                WebDAVUploadQueue.shared.enqueue(
+                    accountID: account.id,
+                    localURL: document.url,
+                    remotePath: remotePath
+                )
+                errorMessage = "\(error.localizedDescription) 已加入待上传队列，下次打开此服务器时会自动重试。"
             }
         }
     }
