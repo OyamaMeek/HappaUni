@@ -119,6 +119,16 @@ struct HappaUniTests {
         #expect(FolderTreeBuilder.descendantIDs(of: root.id, in: [root, child, grandchild]) == [root.id, child.id, grandchild.id])
     }
 
+    @Test("Folder tree skips a two-node parent cycle")
+    func skipsTwoNodeParentCycle() {
+        let aID = UUID()
+        let bID = UUID()
+        let folderA = LibraryFolder(id: aID, name: "A", parentID: bID)
+        let folderB = LibraryFolder(id: bID, name: "B", parentID: aID)
+
+        #expect(FolderTreeBuilder.make(from: [folderA, folderB]).isEmpty)
+    }
+
     @Test("Atomic local imports remove copied files after a later copy fails")
     func rollsBackPartialImport() throws {
         let sourceDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)

@@ -67,6 +67,13 @@ struct MetadataEditorView: View {
     }
 
     private func save() {
+        let originalValues = (
+            name: document.name,
+            tags: document.tags,
+            folderID: document.folderID,
+            modifiedAt: document.modifiedAt
+        )
+
         document.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         document.tags = tagsText.split(separator: ",").map(String.init)
         document.folderID = selectedFolderID
@@ -76,6 +83,10 @@ struct MetadataEditorView: View {
             try modelContext.save()
             dismiss()
         } catch {
+            document.name = originalValues.name
+            document.tags = originalValues.tags
+            document.folderID = originalValues.folderID
+            document.modifiedAt = originalValues.modifiedAt
             errorMessage = error.localizedDescription
         }
     }

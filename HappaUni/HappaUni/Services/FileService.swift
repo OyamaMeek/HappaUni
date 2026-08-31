@@ -26,7 +26,7 @@ struct FileService {
         var errorDescription: String? {
             switch self {
             case .documentsDirectoryUnavailable: "无法访问本地资料库目录。"
-            case .unsupportedFile: "请选择 PDF、Markdown、EPUB、文本或图片文件。"
+            case .unsupportedFile: "请选择 PDF、Markdown、TeX、EPUB、文本或图片文件。"
             }
         }
     }
