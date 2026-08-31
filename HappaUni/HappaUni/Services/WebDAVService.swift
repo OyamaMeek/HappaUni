@@ -224,12 +224,16 @@ enum WebDAVRemotePath {
     }
 
     static func requestURL(serverURL: URL, href: String) -> URL {
-        guard href.hasPrefix("/"),
+        let normalizedHref = normalized(href)
+        let serverBasePath = normalized(serverURL.path)
+
+        guard serverBasePath != "/",
+              normalizedHref == serverBasePath || normalizedHref.hasPrefix(serverBasePath + "/"),
               var components = URLComponents(url: serverURL, resolvingAgainstBaseURL: false) else {
-            return url(serverURL: serverURL, path: href)
+            return url(serverURL: serverURL, path: normalizedHref)
         }
-        components.path = href
-        return components.url ?? url(serverURL: serverURL, path: href)
+        components.path = normalizedHref
+        return components.url ?? url(serverURL: serverURL, path: normalizedHref)
     }
 
     static func parent(of path: String) -> String {

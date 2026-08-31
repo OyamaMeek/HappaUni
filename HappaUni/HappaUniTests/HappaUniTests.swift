@@ -244,6 +244,7 @@ struct HappaUniTests {
 
         #expect(WebDAVRemotePath.url(serverURL: serverURL, path: "/notes/guide.pdf").absoluteString == "https://dav.example.com/root/dav/notes/guide.pdf")
         #expect(WebDAVRemotePath.requestURL(serverURL: serverURL, href: "/root/dav/notes/guide.pdf").absoluteString == "https://dav.example.com/root/dav/notes/guide.pdf")
+        #expect(WebDAVRemotePath.requestURL(serverURL: serverURL, href: "/HappaUni/guide.pdf").absoluteString == "https://dav.example.com/root/dav/HappaUni/guide.pdf")
     }
 
     @Test("Document tags normalize whitespace and duplicates")
