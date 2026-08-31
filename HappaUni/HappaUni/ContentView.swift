@@ -202,30 +202,53 @@ struct ContentView: View {
         .searchable(text: $searchText, prompt: "搜索文件")
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            HStack(spacing: 12) {
+            HStack(spacing: 0) {
                 Button {
                     newFolderParentID = selectedFolderID
                     isShowingAddFolder = true
                 } label: {
-                    Label("新建文件夹", systemImage: "folder.badge.plus")
+                    VStack(spacing: 6) {
+                        Image(systemName: "folder.badge.plus")
+                            .font(.title3.weight(.semibold))
+                        Text("新建文件夹")
+                            .font(.caption.weight(.medium))
+                    }
+                    .frame(maxWidth: .infinity)
                 }
-
-                Spacer(minLength: 0)
+                .buttonStyle(.plain)
 
                 Button {
                     isShowingSettings = true
                 } label: {
-                    Label("设置", systemImage: "gearshape")
+                    VStack(spacing: 6) {
+                        Image(systemName: "gearshape")
+                            .font(.title3.weight(.semibold))
+                        Text("设置")
+                            .font(.caption.weight(.medium))
+                    }
+                    .frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.plain)
             }
-            .labelStyle(.iconOnly)
-            .font(.title3)
-            .padding(.horizontal, 18)
-            .padding(.vertical, 12)
-            .background(.ultraThinMaterial)
-            .overlay(alignment: .top) {
-                Divider()
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 10)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay {
+                Capsule()
+                    .stroke(
+                        LinearGradient(
+                            colors: [.white.opacity(0.34), .white.opacity(0.08)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 1
+                    )
             }
+            .shadow(color: .black.opacity(0.26), radius: 18, y: 10)
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 12)
         }
     }
 
