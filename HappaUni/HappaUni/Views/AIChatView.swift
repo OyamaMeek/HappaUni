@@ -92,14 +92,25 @@ struct AIChatView: View {
                 guard let baseURL = URL(string: baseURLString) else { throw AIService.Error.requestFailed }
                 var requestMessages = [AIMessage(role: .system, content: systemPrompt)]
                 requestMessages.append(contentsOf: messages.filter { $0.role != .system })
-                let answer = try await AIService.shared.complete(
-                    messages: requestMessages,
-                    configuration: AIConfiguration(apiKey: apiKey, baseURL: baseURL, model: model)
-                )
-                let assistantMessage = AIMessage(role: .assistant, content: answer)
+                let configuration = AIConfiguration(apiKey: apiKey, baseURL: baseURL, model: model)
+                let assistantMessage = AIMessage(role: .assistant, content: "")
                 messages.append(assistantMessage)
-                persist(assistantMessage)
+                for try await fragment in AIService.shared.stream(
+                    messages: requestMessages,
+                    configuration: configuration
+                ) {
+                    guard let index = messages.firstIndex(where: { $0.id == assistantMessage.id }) else { continue }
+                    messages[index].content += fragment
+                }
+                guard let finalMessage = messages.first(where: { $0.id == assistantMessage.id }),
+                      !finalMessage.content.isEmpty else {
+                    throw AIService.Error.requestFailed
+                }
+                persist(finalMessage)
             } catch {
+                if let lastMessage = messages.last, lastMessage.role == .assistant, lastMessage.content.isEmpty {
+                    messages.removeLast()
+                }
                 errorMessage = error.localizedDescription
             }
             isSending = false
