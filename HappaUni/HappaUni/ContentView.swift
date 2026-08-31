@@ -24,15 +24,11 @@ struct ContentView: View {
     @State private var newFolderParentID: UUID?
 
     private var folderNodes: [FolderTreeNode] { FolderTreeBuilder.make(from: folders) }
-    private var selectedFolderDescendantIDs: Set<UUID>? {
-        selectedFolderID.map { FolderTreeBuilder.descendantIDs(of: $0, in: folders) }
-    }
-
     private var filteredDocuments: [LibraryDocument] {
         documents.filter { document in
-            let matchesFolder = selectedFolderDescendantIDs.map { document.folderID.map($0.contains) ?? false } ?? true
-            let matchesSearch = searchText.isEmpty || document.name.localizedCaseInsensitiveContains(searchText) || document.tags.contains { $0.localizedCaseInsensitiveContains(searchText) }
-            return matchesFolder && matchesSearch
+            searchText.isEmpty
+                || document.name.localizedCaseInsensitiveContains(searchText)
+                || document.tags.contains { $0.localizedCaseInsensitiveContains(searchText) }
         }
     }
 
@@ -170,50 +166,23 @@ struct ContentView: View {
                 } label: {
                     Label("全部资料", systemImage: selectedFolderID == nil ? "folder.fill" : "folder")
                 }
-                OutlineGroup(folderNodes, children: \.optionalChildren) { node in
-                    Button {
-                        selectedFolderID = node.folder.id
-                    } label: {
-                        Label(node.folder.name, systemImage: selectedFolderID == node.folder.id ? "folder.fill" : "folder")
-                    }
-                    .contextMenu {
-                        Button {
-                            newFolderParentID = node.folder.id
-                            isShowingAddFolder = true
-                        } label: {
-                            Label("新建子文件夹", systemImage: "folder.badge.plus")
-                        }
-                        Button(role: .destructive) {
-                            deleteFolder(node.folder)
-                        } label: {
-                            Label("删除文件夹", systemImage: "trash")
-                        }
-                    }
-                }
-            }
 
-            Section("本地文件") {
-                if filteredDocuments.isEmpty {
-                    ContentUnavailableView.search(text: searchText)
-                        .listRowBackground(Color.clear)
-                } else {
-                    ForEach(filteredDocuments) { document in
-                        DocumentRow(document: document)
-                            .tag(document.persistentModelID)
-                            .contextMenu {
-                                Button {
-                                    editingDocument = document
-                                } label: {
-                                    Label("编辑标签", systemImage: "tag")
-                                }
-                                Button(role: .destructive) {
-                                    delete(document)
-                                } label: {
-                                    Label("删除", systemImage: "trash")
-                                }
-                            }
-                    }
-                    .onDelete(perform: deleteDocuments)
+                FolderTreeRows(
+                    nodes: folderNodes,
+                    documents: filteredDocuments,
+                    selectedFolderID: $selectedFolderID,
+                    selectedDocumentID: $selectedDocumentID,
+                    editingDocument: $editingDocument,
+                    onAddSubfolder: { folder in
+                        newFolderParentID = folder.id
+                        isShowingAddFolder = true
+                    },
+                    onDeleteFolder: deleteFolder,
+                    onDeleteDocument: delete
+                )
+
+                ForEach(filteredDocuments.filter { $0.folderID == nil }) { document in
+                    documentRow(document)
                 }
             }
         }
@@ -268,6 +237,23 @@ struct ContentView: View {
             .padding(.top, 8)
             .padding(.bottom, 12)
         }
+    }
+
+    private func documentRow(_ document: LibraryDocument) -> some View {
+        DocumentRow(document: document)
+            .tag(document.persistentModelID)
+            .contextMenu {
+                Button {
+                    editingDocument = document
+                } label: {
+                    Label("编辑标签", systemImage: "tag")
+                }
+                Button(role: .destructive) {
+                    delete(document)
+                } label: {
+                    Label("删除", systemImage: "trash")
+                }
+            }
     }
 
     private func importFiles(_ result: Result<[URL], Error>) {
@@ -339,6 +325,86 @@ struct ContentView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+}
+
+private struct FolderTreeRows: View {
+    let nodes: [FolderTreeNode]
+    let documents: [LibraryDocument]
+    @Binding var selectedFolderID: UUID?
+    @Binding var selectedDocumentID: PersistentIdentifier?
+    @Binding var editingDocument: LibraryDocument?
+    let onAddSubfolder: (LibraryFolder) -> Void
+    let onDeleteFolder: (LibraryFolder) -> Void
+    let onDeleteDocument: (LibraryDocument) -> Void
+
+    var body: some View {
+        ForEach(nodes) { node in
+            DisclosureGroup {
+                ForEach(documents.filter { $0.folderID == node.folder.id }) { document in
+                    LibrarySidebarDocumentRow(
+                        document: document,
+                        editingDocument: $editingDocument,
+                        onDelete: onDeleteDocument
+                    )
+                    .tag(document.persistentModelID)
+                }
+                FolderTreeRows(
+                    nodes: node.children,
+                    documents: documents,
+                    selectedFolderID: $selectedFolderID,
+                    selectedDocumentID: $selectedDocumentID,
+                    editingDocument: $editingDocument,
+                    onAddSubfolder: onAddSubfolder,
+                    onDeleteFolder: onDeleteFolder,
+                    onDeleteDocument: onDeleteDocument
+                )
+            } label: {
+                Button {
+                    selectedFolderID = node.folder.id
+                } label: {
+                    Label(
+                        node.folder.name,
+                        systemImage: selectedFolderID == node.folder.id ? "folder.fill" : "folder"
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+            .contextMenu {
+                Button {
+                    onAddSubfolder(node.folder)
+                } label: {
+                    Label("新建子文件夹", systemImage: "folder.badge.plus")
+                }
+                Button(role: .destructive) {
+                    onDeleteFolder(node.folder)
+                } label: {
+                    Label("删除文件夹", systemImage: "trash")
+                }
+            }
+        }
+    }
+}
+
+private struct LibrarySidebarDocumentRow: View {
+    let document: LibraryDocument
+    @Binding var editingDocument: LibraryDocument?
+    let onDelete: (LibraryDocument) -> Void
+
+    var body: some View {
+        DocumentRow(document: document)
+            .contextMenu {
+                Button {
+                    editingDocument = document
+                } label: {
+                    Label("编辑标签", systemImage: "tag")
+                }
+                Button(role: .destructive) {
+                    onDelete(document)
+                } label: {
+                    Label("删除", systemImage: "trash")
+                }
+            }
     }
 }
 
