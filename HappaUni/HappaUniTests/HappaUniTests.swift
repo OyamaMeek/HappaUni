@@ -119,14 +119,14 @@ struct HappaUniTests {
         #expect(FolderTreeBuilder.descendantIDs(of: root.id, in: [root, child, grandchild]) == [root.id, child.id, grandchild.id])
     }
 
-    @Test("Folder tree skips a two-node parent cycle")
-    func skipsTwoNodeParentCycle() {
+    @Test("Folder descendants terminate on a two-node parent cycle")
+    func terminatesTwoNodeParentCycle() {
         let aID = UUID()
         let bID = UUID()
         let folderA = LibraryFolder(id: aID, name: "A", parentID: bID)
         let folderB = LibraryFolder(id: bID, name: "B", parentID: aID)
 
-        #expect(FolderTreeBuilder.make(from: [folderA, folderB]).isEmpty)
+        #expect(FolderTreeBuilder.descendantIDs(of: aID, in: [folderA, folderB]) == [aID, bID])
     }
 
     @Test("Atomic local imports remove copied files after a later copy fails")
