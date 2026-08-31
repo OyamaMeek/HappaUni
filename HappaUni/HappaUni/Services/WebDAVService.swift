@@ -13,12 +13,14 @@ struct WebDAVFile: Identifiable, Equatable {
 final class WebDAVXMLParser: NSObject, XMLParserDelegate {
     private var files: [WebDAVFile] = []
     private var basePath = "/"
+    private var serverBasePath = ""
     private var currentElement = ""
     private var currentValues: [String: String] = [:]
     private var isCollection = false
 
-    func parse(data: Data, basePath: String) throws -> [WebDAVFile] {
-        self.basePath = basePath.hasSuffix("/") ? basePath : basePath + "/"
+    func parse(data: Data, basePath: String, serverBasePath: String = "/") throws -> [WebDAVFile] {
+        self.basePath = Self.normalized(basePath)
+        self.serverBasePath = Self.normalizedServerBasePath(serverBasePath)
         files = []
         let parser = XMLParser(data: data)
         parser.delegate = self
@@ -40,13 +42,32 @@ final class WebDAVXMLParser: NSObject, XMLParserDelegate {
     func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
         guard elementName.lowercased() == "response", let href = currentValues["href"]?.removingPercentEncoding else { return }
         let normalized = href.hasPrefix("/") ? href : "/" + href
-        let comparablePath = normalized.hasSuffix("/") ? normalized : normalized + "/"
-        guard comparablePath != basePath else { return }
+        let path = Self.removingServerBasePath(from: normalized, serverBasePath: serverBasePath)
+        guard Self.normalized(path) != basePath else { return }
         let filename = currentValues["displayname"]?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let name = (filename?.isEmpty == false ? filename! : URL(fileURLWithPath: normalized).lastPathComponent)
+        let name = (filename?.isEmpty == false ? filename! : URL(fileURLWithPath: path).lastPathComponent)
         let size = Int64(currentValues["getcontentlength"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "0") ?? 0
         let date = currentValues["getlastmodified"].flatMap { Self.httpDateFormatter.date(from: $0.trimmingCharacters(in: .whitespacesAndNewlines)) }
-        files.append(WebDAVFile(path: normalized, name: name, isDirectory: isCollection, size: size, modifiedAt: date, eTag: currentValues["getetag"]?.trimmingCharacters(in: .whitespacesAndNewlines)))
+        files.append(WebDAVFile(path: path, name: name, isDirectory: isCollection, size: size, modifiedAt: date, eTag: currentValues["getetag"]?.trimmingCharacters(in: .whitespacesAndNewlines)))
+    }
+
+    private static func normalized(_ path: String) -> String {
+        let trimmed = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return trimmed.isEmpty ? "/" : "/" + trimmed
+    }
+
+    private static func normalizedServerBasePath(_ path: String) -> String {
+        let normalized = normalized(path)
+        return normalized == "/" ? "" : normalized
+    }
+
+    private static func removingServerBasePath(from path: String, serverBasePath: String) -> String {
+        guard !serverBasePath.isEmpty,
+              path == serverBasePath || path.hasPrefix(serverBasePath + "/") else {
+            return normalized(path)
+        }
+        let relativePath = String(path.dropFirst(serverBasePath.count))
+        return normalized(relativePath)
     }
 
     private static let httpDateFormatter: DateFormatter = {
@@ -81,7 +102,11 @@ final class WebDAVService {
         request.httpBody = Data("<D:propfind xmlns:D=\"DAV:\"><D:prop><D:displayname/><D:getcontentlength/><D:getlastmodified/><D:getetag/><D:resourcetype/></D:prop></D:propfind>".utf8)
         let (data, response) = try await session.data(for: request)
         try validate(response, otherwise: .listDirectoryFailed)
-        return try WebDAVXMLParser().parse(data: data, basePath: path)
+        return try WebDAVXMLParser().parse(
+            data: data,
+            basePath: path,
+            serverBasePath: url.path
+        )
     }
 
     func download(url: URL, username: String, password: String, to localURL: URL) async throws {

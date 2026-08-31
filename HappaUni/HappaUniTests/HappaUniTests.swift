@@ -107,6 +107,24 @@ struct HappaUniTests {
         #expect(!files[0].isDirectory)
     }
 
+    @Test("WebDAV response parser removes the server base path before listing files")
+    func parsesWebDAVFilesFromServerBasePath() throws {
+        let xml = """
+        <D:multistatus xmlns:D="DAV:">
+          <D:response><D:href>/dav/HappaUni/</D:href><D:propstat><D:prop><D:displayname>HappaUni</D:displayname><D:resourcetype><D:collection/></D:resourcetype></D:prop></D:propstat></D:response>
+          <D:response><D:href>/dav/HappaUni/guide.pdf</D:href><D:propstat><D:prop><D:displayname>guide.pdf</D:displayname><D:getcontentlength>2048</D:getcontentlength><D:resourcetype/></D:prop></D:propstat></D:response>
+        </D:multistatus>
+        """
+
+        let files = try WebDAVXMLParser().parse(
+            data: Data(xml.utf8),
+            basePath: "/HappaUni",
+            serverBasePath: "/dav"
+        )
+
+        #expect(files.map(\.path) == ["/HappaUni/guide.pdf"])
+    }
+
     @Test("AI context extractor keeps the newest content within its character limit")
     func truncatesAIContext() {
         let value = AIContextExtractor.truncate("abcdefghij", maximumCharacters: 6)

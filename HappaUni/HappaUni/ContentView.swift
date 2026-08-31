@@ -364,7 +364,7 @@ private struct LibraryAddMenu: View {
         .buttonStyle(.plain)
         .accessibilityLabel("资料库操作")
         .popover(isPresented: $isPresented, arrowEdge: .top) {
-            HStack(spacing: 10) {
+            VStack(spacing: 10) {
                 actionButton(
                     title: "导入",
                     systemImage: "square.and.arrow.down",
