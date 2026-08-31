@@ -376,10 +376,13 @@ private struct LibraryAddMenu: View {
                     action: onCreateFolder
                 )
             }
-            .padding(10)
-            .background(.ultraThinMaterial, in: Capsule())
+            .padding(12)
+            .background(
+                .ultraThinMaterial,
+                in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+            )
             .overlay {
-                Capsule()
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
                     .stroke(
                         LinearGradient(
                             colors: [.white.opacity(0.48), .white.opacity(0.08)],
@@ -407,10 +410,10 @@ private struct LibraryAddMenu: View {
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
             }
-            .frame(minWidth: 118, alignment: .leading)
+            .frame(minWidth: 132, alignment: .leading)
             .padding(.horizontal, 12)
             .padding(.vertical, 11)
-            .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
