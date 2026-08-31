@@ -113,6 +113,18 @@ struct HappaUniTests {
         #expect(value == "…efghij")
     }
 
+    @Test("AI conversation messages retain their request role when restored")
+    func restoresAIConversationMessageRole() {
+        let message = AIConversationMessage(
+            conversationID: UUID(),
+            role: .user,
+            content: "这份资料的重点是什么？"
+        )
+
+        #expect(message.asAIMessage().role == .user)
+        #expect(message.asAIMessage().content == "这份资料的重点是什么？")
+    }
+
     @Test("WebDAV account input normalizes a server URL and requires credentials")
     func validatesWebDAVAccountInput() throws {
         let input = WebDAVAccountInput(

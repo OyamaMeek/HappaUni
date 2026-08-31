@@ -1,12 +1,17 @@
 import SwiftUI
+import SwiftData
 
 struct AIChatView: View {
     let document: LibraryDocument
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Query(sort: \AIConversation.updatedAt, order: .reverse) private var conversations: [AIConversation]
+    @Query(sort: \AIConversationMessage.createdAt) private var storedMessages: [AIConversationMessage]
     @AppStorage("ai.baseURL") private var baseURLString = "https://api.openai.com/v1"
     @AppStorage("ai.model") private var model = "gpt-4o-mini"
     @State private var messages: [AIMessage] = []
+    @State private var conversationID: UUID?
     @State private var draft = ""
     @State private var isSending = false
     @State private var errorMessage: String?
@@ -59,6 +64,9 @@ struct AIChatView: View {
                     Button("完成") { dismiss() }
                 }
             }
+            .task(id: document.id) {
+                loadConversation()
+            }
             .alert("AI 问答", isPresented: Binding(
                 get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } }
             )) {
@@ -73,7 +81,9 @@ struct AIChatView: View {
         let question = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !question.isEmpty else { return }
         draft = ""
-        messages.append(AIMessage(role: .user, content: question))
+        let userMessage = AIMessage(role: .user, content: question)
+        messages.append(userMessage)
+        persist(userMessage)
         isSending = true
 
         Task {
@@ -86,11 +96,49 @@ struct AIChatView: View {
                     messages: requestMessages,
                     configuration: AIConfiguration(apiKey: apiKey, baseURL: baseURL, model: model)
                 )
-                messages.append(AIMessage(role: .assistant, content: answer))
+                let assistantMessage = AIMessage(role: .assistant, content: answer)
+                messages.append(assistantMessage)
+                persist(assistantMessage)
             } catch {
                 errorMessage = error.localizedDescription
             }
             isSending = false
+        }
+    }
+
+    private func loadConversation() {
+        let conversation: AIConversation
+        if let existing = conversations.first(where: { $0.documentID == document.id }) {
+            conversation = existing
+        } else {
+            conversation = AIConversation(documentID: document.id, documentName: document.name)
+            modelContext.insert(conversation)
+        }
+        conversationID = conversation.id
+        messages = storedMessages
+            .filter { $0.conversationID == conversation.id }
+            .map { $0.asAIMessage() }
+        try? modelContext.save()
+    }
+
+    private func persist(_ message: AIMessage) {
+        guard let conversationID else { return }
+        modelContext.insert(
+            AIConversationMessage(
+                id: message.id,
+                conversationID: conversationID,
+                role: message.role,
+                content: message.content,
+                createdAt: message.createdAt
+            )
+        )
+        if let conversation = conversations.first(where: { $0.id == conversationID }) {
+            conversation.updatedAt = .now
+        }
+        do {
+            try modelContext.save()
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
