@@ -3,6 +3,71 @@ import Testing
 @testable import HappaUni
 
 struct HappaUniTests {
+    @Test("EPUB package parser orders spine chapters")
+    func ordersEPUBSpine() throws {
+        let fixtureOPF = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+          <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+            <dc:title>测试图书</dc:title>
+          </metadata>
+          <manifest>
+            <item id="chapter-2" href="text/第二章.xhtml" media-type="application/xhtml+xml"/>
+            <item id="chapter-1" href="text/第一章.xhtml" media-type="application/xhtml+xml"/>
+          </manifest>
+          <spine>
+            <itemref idref="chapter-1"/>
+            <itemref idref="chapter-2"/>
+          </spine>
+        </package>
+        """
+
+        let book = try EPUBService.parsePackage(
+            opf: fixtureOPF,
+            baseURL: URL(fileURLWithPath: "/tmp/book")
+        )
+
+        #expect(book.title == "测试图书")
+        #expect(book.chapters.map(\.title) == ["第一章", "第二章"])
+        #expect(book.chapters.map(\.url.path) == [
+            "/tmp/book/text/第一章.xhtml",
+            "/tmp/book/text/第二章.xhtml"
+        ])
+    }
+
+    @Test("LaTeX preview escapes document source")
+    func escapesLaTeXPreview() {
+        #expect(LaTeXService.html(for: #"x < y"#).contains("x &lt; y"))
+    }
+
+    @Test("EPUB reader unpacks a local stored archive into readable chapters")
+    func opensStoredEPUBArchive() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let archiveURL = directory.appendingPathComponent("book.epub")
+        try makeStoredZIP([
+            ("mimetype", "application/epub+zip"),
+            ("META-INF/container.xml", """
+            <?xml version="1.0"?>
+            <container><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>
+            """),
+            ("OEBPS/content.opf", """
+            <package><metadata><title>本地书</title></metadata><manifest>
+            <item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/>
+            </manifest><spine><itemref idref="chapter"/></spine></package>
+            """),
+            ("OEBPS/chapter.xhtml", "<html><body><h1>第一章</h1></body></html>")
+        ]).write(to: archiveURL)
+
+        let book = try EPUBService.open(archiveURL)
+
+        #expect(book.title == "本地书")
+        #expect(book.chapters.map(\.title) == ["chapter"])
+        #expect(FileManager.default.fileExists(atPath: book.chapters[0].url.path))
+    }
+
     @Test("DocumentType detects supported file extensions")
     func detectsDocumentTypes() {
         #expect(DocumentType.detect(from: "research.PDF") == .pdf)
@@ -148,5 +213,68 @@ struct HappaUniTests {
             try FileService().importFiles([validSource, missingSource], into: destinationDirectory)
         }
         #expect(try FileManager.default.contentsOfDirectory(atPath: destinationDirectory.path).isEmpty)
+    }
+
+    private func makeStoredZIP(_ entries: [(String, String)]) -> Data {
+        var archive = Data()
+        var centralDirectory = Data()
+
+        for (path, content) in entries {
+            let pathData = Data(path.utf8)
+            let contentData = Data(content.utf8)
+            let localOffset = UInt32(archive.count)
+
+            archive.appendLittleEndian(UInt32(0x04034B50))
+            archive.appendLittleEndian(UInt16(20))
+            archive.appendLittleEndian(UInt16(0))
+            archive.appendLittleEndian(UInt16(0))
+            archive.appendLittleEndian(UInt16(0))
+            archive.appendLittleEndian(UInt16(0))
+            archive.appendLittleEndian(UInt32(0))
+            archive.appendLittleEndian(UInt32(contentData.count))
+            archive.appendLittleEndian(UInt32(contentData.count))
+            archive.appendLittleEndian(UInt16(pathData.count))
+            archive.appendLittleEndian(UInt16(0))
+            archive.append(pathData)
+            archive.append(contentData)
+
+            centralDirectory.appendLittleEndian(UInt32(0x02014B50))
+            centralDirectory.appendLittleEndian(UInt16(20))
+            centralDirectory.appendLittleEndian(UInt16(20))
+            centralDirectory.appendLittleEndian(UInt16(0))
+            centralDirectory.appendLittleEndian(UInt16(0))
+            centralDirectory.appendLittleEndian(UInt16(0))
+            centralDirectory.appendLittleEndian(UInt16(0))
+            centralDirectory.appendLittleEndian(UInt32(0))
+            centralDirectory.appendLittleEndian(UInt32(contentData.count))
+            centralDirectory.appendLittleEndian(UInt32(contentData.count))
+            centralDirectory.appendLittleEndian(UInt16(pathData.count))
+            centralDirectory.appendLittleEndian(UInt16(0))
+            centralDirectory.appendLittleEndian(UInt16(0))
+            centralDirectory.appendLittleEndian(UInt16(0))
+            centralDirectory.appendLittleEndian(UInt16(0))
+            centralDirectory.appendLittleEndian(UInt32(0))
+            centralDirectory.appendLittleEndian(localOffset)
+            centralDirectory.append(pathData)
+        }
+
+        let centralOffset = UInt32(archive.count)
+        archive.append(centralDirectory)
+        archive.appendLittleEndian(UInt32(0x06054B50))
+        archive.appendLittleEndian(UInt16(0))
+        archive.appendLittleEndian(UInt16(0))
+        archive.appendLittleEndian(UInt16(entries.count))
+        archive.appendLittleEndian(UInt16(entries.count))
+        archive.appendLittleEndian(UInt32(centralDirectory.count))
+        archive.appendLittleEndian(centralOffset)
+        archive.appendLittleEndian(UInt16(0))
+        return archive
+    }
+}
+
+private extension Data {
+    mutating func appendLittleEndian<T: FixedWidthInteger>(_ value: T) {
+        var littleEndian = value.littleEndian
+        append(Data(bytes: &littleEndian, count: MemoryLayout<T>.size))
     }
 }
