@@ -33,3 +33,20 @@
 - **Git 提交**：`4402c22 fix: show selected folder documents`
 
 ---
+## [2026-09-01 17:09] PDF 封面与快捷导入
+
+- **需求/问题描述**：
+  > 支持 PDF 封面显示；将资料库左上角加号改为“导入文件”；导入完成后自动打开导入的文件。
+
+- **实际实现的功能与改动**：
+  - [PDF 封面]：资料夹的文档卡片会读取 PDF 首页并显示为封面缩略图；读取失败时保留 PDF 图标作为回退。
+  - [快捷导入]：资料库左上角操作改为带图标的“导入文件”按钮，点击后直接唤起系统文件选择器。
+  - [自动打开]：导入并完成保存后，退出文件夹浏览并自动进入最后导入文档的阅读页。
+  - [测试/验证]：`git diff --check` 通过；使用 Xcode Beta 的 iPhone Simulator Debug 构建成功。
+
+- **涉及文件**：
+  - `HappaUni/HappaUni/ContentView.swift` (+65 / -99)
+
+- **Git 提交**：`4e4e644 feat: preview PDF covers after import`
+
+---
