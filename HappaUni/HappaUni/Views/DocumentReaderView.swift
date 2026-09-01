@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 import UIKit
 
 struct DocumentReaderView: View {
@@ -17,6 +18,7 @@ struct DocumentReaderView: View {
 
     let document: LibraryDocument
     let onBack: () -> Void
+    @Environment(\.modelContext) private var modelContext
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Binding var outlineDestination: DocumentOutlineItem.Destination?
     @State private var requestedPDFPage: Int?
@@ -67,7 +69,12 @@ struct DocumentReaderView: View {
     private var reader: some View {
         switch document.type {
         case .pdf:
-            PDFReaderView(url: document.url, requestedPage: $requestedPDFPage)
+            PDFReaderView(
+                url: document.url,
+                initialPage: document.lastReadPage,
+                onPageChanged: saveReadingPage,
+                requestedPage: $requestedPDFPage,
+            )
         case .markdown:
             MarkdownReaderView(url: document.url, requestedAnchor: $requestedMarkdownAnchor)
         case .tex:
@@ -114,6 +121,12 @@ struct DocumentReaderView: View {
         case let .anchor(anchor):
             requestedMarkdownAnchor = anchor
         }
+    }
+
+    private func saveReadingPage(_ page: Int) {
+        guard document.lastReadPage != page else { return }
+        document.lastReadPage = page
+        try? modelContext.save()
     }
 }
 

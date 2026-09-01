@@ -65,6 +65,7 @@ final class LibraryDocument {
     var isArchived: Bool = false
     var tagsRawValue: String
     var folderID: UUID?
+    var lastReadPage: Int = 1
 
     init(
         id: UUID = UUID(),

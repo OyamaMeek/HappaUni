@@ -7,6 +7,8 @@ import UIKit
 
 struct PDFReaderView: View {
     let url: URL
+    let initialPage: Int
+    let onPageChanged: (Int) -> Void
 
     @State private var state = PDFDocumentState.empty
     @State private var searchText = ""
@@ -17,10 +19,12 @@ struct PDFReaderView: View {
     var body: some View {
         PDFKitDocumentView(
             url: url,
+            initialPage: initialPage,
             requestedPage: $requestedPage,
             requestedZoom: $requestedZoom,
             searchText: searchText,
             isMarkupEnabled: isMarkupEnabled,
+            onPageChanged: onPageChanged,
             state: $state
         )
         .background(Color.black)
@@ -86,14 +90,16 @@ struct PDFReaderView: View {
 
 private struct PDFKitDocumentView: UIViewRepresentable {
     let url: URL
+    let initialPage: Int
     @Binding var requestedPage: Int?
     @Binding var requestedZoom: CGFloat?
     let searchText: String
     let isMarkupEnabled: Bool
+    let onPageChanged: (Int) -> Void
     @Binding var state: PDFDocumentState
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(state: $state)
+        Coordinator(state: $state, onPageChanged: onPageChanged)
     }
 
     func makeUIView(context: Context) -> PDFView {
@@ -103,13 +109,13 @@ private struct PDFKitDocumentView: UIViewRepresentable {
         view.displayDirection = .vertical
         view.backgroundColor = .black
         context.coordinator.observe(view)
-        context.coordinator.load(url: url, into: view)
+        context.coordinator.load(url: url, initialPage: initialPage, into: view)
         return view
     }
 
     func updateUIView(_ view: PDFView, context: Context) {
         if context.coordinator.loadedURL != url {
-            context.coordinator.load(url: url, into: view)
+            context.coordinator.load(url: url, initialPage: initialPage, into: view)
         }
         if let requestedPage, let page = view.document?.page(at: requestedPage - 1) {
             view.go(to: page)
@@ -125,13 +131,15 @@ private struct PDFKitDocumentView: UIViewRepresentable {
 
     final class Coordinator: NSObject {
         @Binding private var state: PDFDocumentState
+        private let onPageChanged: (Int) -> Void
         private var observers: [NSObjectProtocol] = []
         private var lastSearchText = ""
         private var overlayProvider: PDFInkOverlayProvider?
         var loadedURL: URL?
 
-        init(state: Binding<PDFDocumentState>) {
+        init(state: Binding<PDFDocumentState>, onPageChanged: @escaping (Int) -> Void) {
             _state = state
+            self.onPageChanged = onPageChanged
         }
 
         deinit {
@@ -150,7 +158,7 @@ private struct PDFKitDocumentView: UIViewRepresentable {
             ]
         }
 
-        func load(url: URL, into view: PDFView) {
+        func load(url: URL, initialPage: Int, into view: PDFView) {
             loadedURL = url
             view.document = nil
             view.pageOverlayViewProvider = nil
@@ -172,6 +180,10 @@ private struct PDFKitDocumentView: UIViewRepresentable {
 
                 view.document = document
                 view.autoScales = true
+                let restoredPage = min(max(initialPage, 1), document.pageCount)
+                if let page = document.page(at: restoredPage - 1) {
+                    view.go(to: page)
+                }
                 let provider = PDFInkOverlayProvider(
                     document: document,
                     documentURL: url,
@@ -210,6 +222,9 @@ private struct PDFKitDocumentView: UIViewRepresentable {
                 currentPage: view.currentPage,
                 zoomScale: view.scaleFactor
             )
+            if state.currentPage > 0 {
+                onPageChanged(state.currentPage)
+            }
         }
     }
 }
