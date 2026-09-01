@@ -47,13 +47,52 @@ struct AIChatView: View {
                 HStack(alignment: .bottom, spacing: 12) {
                     TextField("问问这份文档", text: $draft, axis: .vertical)
                         .lineLimit(1...5)
-                        .textFieldStyle(.roundedBorder)
+                        .textFieldStyle(.plain)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(.thinMaterial, in: Capsule())
+                        .overlay {
+                            Capsule()
+                                .stroke(
+                                    LinearGradient(
+                                        colors: [.white.opacity(0.38), .white.opacity(0.08)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ),
+                                    lineWidth: 1
+                                )
+                        }
                     Button(action: send) {
-                        if isSending { ProgressView() } else { Image(systemName: "arrow.up.circle.fill").font(.title2) }
+                        if isSending {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "arrow.up")
+                                .font(.headline.weight(.bold))
+                                .frame(width: 38, height: 38)
+                        }
                     }
                     .disabled(isSending || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .background(.thinMaterial, in: Circle())
+                    .overlay {
+                        Circle()
+                            .stroke(.white.opacity(0.28), lineWidth: 1)
+                    }
                 }
-                .padding()
+                .padding(12)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .stroke(
+                            LinearGradient(
+                                colors: [.white.opacity(0.34), .white.opacity(0.06)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
+                        )
+                }
+                .shadow(color: .black.opacity(0.18), radius: 14, y: 6)
+                .padding(12)
         }
         .task(id: document.id) {
                 loadConversation()

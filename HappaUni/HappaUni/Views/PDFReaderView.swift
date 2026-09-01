@@ -221,8 +221,7 @@ private final class PDFInkOverlayProvider: NSObject, PDFPageOverlayViewProvider,
     private var canvases: [Int: PKCanvasView] = [:]
     private var saveWorkItem: DispatchWorkItem?
     private var isMarkupEnabled = false
-    private weak var pdfView: PDFView?
-    private let toolPicker = PKToolPicker()
+    private var toolPicker: PKToolPicker?
 
     init(document: PDFDocument, documentURL: URL, drawingData: [Int: Data]) {
         self.document = document
@@ -238,27 +237,29 @@ private final class PDFInkOverlayProvider: NSObject, PDFPageOverlayViewProvider,
         let canvas = PKCanvasView()
         canvas.backgroundColor = .clear
         canvas.isOpaque = false
-        canvas.drawingPolicy = .pencilOnly
+        canvas.drawingPolicy = .anyInput
         canvas.delegate = self
         canvas.drawing = drawing(for: pageIndex)
         canvases[pageIndex] = canvas
         configureCanvas(canvas)
-        if isMarkupEnabled, view.currentPage === page {
-            showNativeToolPicker(for: canvas)
+        if isMarkupEnabled {
+            presentNativeToolPicker(for: canvas)
         }
         return canvas
     }
 
     func configure(isEnabled: Bool, in view: PDFView) {
         isMarkupEnabled = isEnabled
-        pdfView = view
         canvases.values.forEach(configureCanvas)
-        guard let canvas = canvas(for: view.currentPage) else { return }
         if isEnabled {
-            showNativeToolPicker(for: canvas)
+            if let canvas = canvas(for: view.currentPage) {
+                presentNativeToolPicker(for: canvas)
+            }
         } else {
-            toolPicker.setVisible(false, forFirstResponder: canvas)
-            canvas.resignFirstResponder()
+            canvases.values.forEach { canvas in
+                toolPicker?.setVisible(false, forFirstResponder: canvas)
+                canvas.resignFirstResponder()
+            }
         }
     }
 
@@ -268,17 +269,23 @@ private final class PDFInkOverlayProvider: NSObject, PDFPageOverlayViewProvider,
 
     private func configureCanvas(_ canvas: PKCanvasView) {
         canvas.isUserInteractionEnabled = isMarkupEnabled
-        if isMarkupEnabled {
-            toolPicker.addObserver(canvas)
-        } else {
-            toolPicker.removeObserver(canvas)
-        }
     }
 
-    private func showNativeToolPicker(for canvas: PKCanvasView) {
-        toolPicker.addObserver(canvas)
-        toolPicker.setVisible(true, forFirstResponder: canvas)
+    private func presentNativeToolPicker(for canvas: PKCanvasView, retryIfNeeded: Bool = true) {
+        guard let window = canvas.window else {
+            guard retryIfNeeded else { return }
+            DispatchQueue.main.async { [weak self, weak canvas] in
+                guard let self, let canvas, self.isMarkupEnabled else { return }
+                self.presentNativeToolPicker(for: canvas, retryIfNeeded: false)
+            }
+            return
+        }
+
+        let picker = PKToolPicker.shared(for: window) ?? toolPicker ?? PKToolPicker()
+        toolPicker = picker
+        picker.addObserver(canvas)
         canvas.becomeFirstResponder()
+        picker.setVisible(true, forFirstResponder: canvas)
     }
 
     private func canvas(for page: PDFPage?) -> PKCanvasView? {
