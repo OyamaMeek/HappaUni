@@ -272,7 +272,7 @@ private final class PDFInkOverlayProvider: NSObject, PDFPageOverlayViewProvider,
             }
         } else {
             canvases.values.forEach { canvas in
-                toolPicker?.setVisible(false, forFirstResponder: canvas)
+                hideNativeToolPicker(for: canvas)
                 canvas.resignFirstResponder()
             }
         }
@@ -296,12 +296,28 @@ private final class PDFInkOverlayProvider: NSObject, PDFPageOverlayViewProvider,
             return
         }
 
-        let picker = PKToolPicker.shared(for: window) ?? toolPicker ?? PKToolPicker()
+        let picker = toolPicker ?? PKToolPicker()
         toolPicker = picker
         picker.addObserver(canvas)
         canvas.isUserInteractionEnabled = true
         canvas.becomeFirstResponder()
-        picker.setVisible(true, forFirstResponder: canvas)
+
+        if #available(iOS 26.0, *) {
+            canvas.pencilKitResponderState.activeToolPicker = picker
+            canvas.pencilKitResponderState.toolPickerVisibility = .visible
+        } else {
+            (PKToolPicker.shared(for: window) ?? picker)
+                .setVisible(true, forFirstResponder: canvas)
+        }
+    }
+
+    private func hideNativeToolPicker(for canvas: PKCanvasView) {
+        if #available(iOS 26.0, *) {
+            canvas.pencilKitResponderState.toolPickerVisibility = .inactive
+            canvas.pencilKitResponderState.activeToolPicker = nil
+        } else {
+            toolPicker?.setVisible(false, forFirstResponder: canvas)
+        }
     }
 
     private func canvas(for page: PDFPage?) -> PKCanvasView? {
