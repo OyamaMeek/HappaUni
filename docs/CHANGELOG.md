@@ -50,3 +50,25 @@
 - **Git 提交**：`4e4e644 feat: preview PDF covers after import`
 
 ---
+## [2026-09-01 18:00] 废纸篓与 WebDAV 备份控制
+
+- **需求/问题描述**：
+  > 长按文件显示“归档到”（选择放入的文件夹）和“删除”；删除后移入废纸篓，废纸篓只备份到 GitHub、不备份到 WebDAV，并在 7 天后清理；设置中可关闭 WebDAV 备份。
+
+- **实际实现的功能与改动**：
+  - [文件操作]：资料卡片和侧栏文档均支持长按菜单，可选择“归档到”任意嵌套文件夹或移入废纸篓；废纸篓内支持恢复到目标文件夹和立即删除。
+  - [废纸篓]：新增废纸篓入口与删除时间记录；应用启动及重新激活时自动清理保留超过 7 天的本地文件。
+  - [备份策略]：废纸篓文件使用 GitHub 的“废纸篓”路径同步，并跳过 WebDAV 上传；备份清单保存废纸篓状态。
+  - [设置]：新增“启用 WebDAV 自动备份”开关，关闭后停止自动上传至 WebDAV。
+  - [测试/验证]：`git diff --check` 通过；iPhone Simulator Debug 构建成功；测试目标已编译，模拟器启动阶段中断了完整测试执行。
+
+- **涉及文件**：
+  - `HappaUni/HappaUni/ContentView.swift` (+237 / -30)
+  - `HappaUni/HappaUni/Models/LibraryDocument.swift` (+4)
+  - `HappaUni/HappaUni/Services/SyncService.swift` (+18 / -1)
+  - `HappaUni/HappaUni/Views/SettingsView.swift` (+7)
+  - `HappaUni/HappaUniTests/HappaUniTests.swift` (+16 / -1)
+
+- **Git 提交**：`03bb7a8 feat: add trash and WebDAV backup controls`
+
+---
