@@ -22,6 +22,7 @@ struct ContentView: View {
     @State private var selectedFolderID: UUID?
     @State private var isShowingAddFolder = false
     @State private var newFolderParentID: UUID?
+    @State private var outlineDestination: DocumentOutlineItem.Destination?
 
     private var folderNodes: [FolderTreeNode] { FolderTreeBuilder.make(from: folders) }
     private var filteredDocuments: [LibraryDocument] {
@@ -38,24 +39,37 @@ struct ContentView: View {
         documents.first { $0.persistentModelID == selectedDocumentID }
     }
 
+    private var selectedDocumentSupportsOutline: Bool {
+        selectedDocument?.type == .pdf || selectedDocument?.type == .markdown
+    }
+
     var body: some View {
         NavigationSplitView {
-            sidebar
-                .navigationTitle("资料库")
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        LibraryAddMenu(
-                            onImport: { isImporting = true },
-                            onCreateFolder: {
-                                newFolderParentID = selectedFolderID
-                                isShowingAddFolder = true
-                            }
-                        )
-                    }
+            if let selectedDocument, selectedDocumentSupportsOutline {
+                DocumentOutlineView(document: selectedDocument) { destination in
+                    outlineDestination = destination
                 }
+            } else {
+                sidebar
+                    .navigationTitle("资料库")
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            LibraryAddMenu(
+                                onImport: { isImporting = true },
+                                onCreateFolder: {
+                                    newFolderParentID = selectedFolderID
+                                    isShowingAddFolder = true
+                                }
+                            )
+                        }
+                    }
+            }
         } detail: {
             if let selectedDocument {
-                DocumentReaderView(document: selectedDocument)
+                DocumentReaderView(
+                    document: selectedDocument,
+                    outlineDestination: $outlineDestination
+                )
             } else {
                 WelcomeView(onImport: { isImporting = true })
             }
@@ -73,6 +87,7 @@ struct ContentView: View {
             SettingsView()
         }
         .task(id: selectedDocumentID) {
+            outlineDestination = nil
             guard let selectedDocument else { return }
             do {
                 try await SyncService.shared.syncFileOnOpen(selectedDocument, repository: githubRepository)

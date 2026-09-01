@@ -17,27 +17,17 @@ struct DocumentReaderView: View {
 
     let document: LibraryDocument
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Binding var outlineDestination: DocumentOutlineItem.Destination?
     @State private var requestedPDFPage: Int?
     @State private var requestedMarkdownAnchor: String?
-    @State private var isOutlineVisible = true
-    @State private var isInspectorVisible = true
+    @State private var isInspectorVisible = false
     @State private var rightPanel: RightPanel = .chat
-
-    private var supportsOutline: Bool {
-        document.type == .pdf || document.type == .markdown
-    }
 
     private var supportsKnowledgeMap: Bool { document.type == .pdf }
     private var usesSidebars: Bool { horizontalSizeClass == .regular }
 
     var body: some View {
         HStack(spacing: 0) {
-            if supportsOutline && usesSidebars && isOutlineVisible {
-                DocumentOutlineView(document: document, onDestination: open)
-                    .frame(minWidth: 250, idealWidth: 300, maxWidth: 340)
-                Divider()
-            }
-
             reader
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -49,16 +39,12 @@ struct DocumentReaderView: View {
         }
         .navigationTitle(document.name)
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: outlineDestination) { _, destination in
+            guard let destination else { return }
+            open(destination)
+        }
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
-                if supportsOutline {
-                    Button {
-                        isOutlineVisible.toggle()
-                    } label: {
-                        Label("目录", systemImage: "list.bullet.indent")
-                    }
-                }
-
                 if supportsKnowledgeMap {
                     Button {
                         rightPanel = .knowledgeMap
