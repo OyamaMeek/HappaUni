@@ -53,15 +53,6 @@ struct DocumentReaderView: View {
             }
 
             ToolbarItemGroup(placement: .topBarTrailing) {
-                if supportsKnowledgeMap {
-                    Button {
-                        rightPanel = .knowledgeMap
-                        isInspectorVisible = true
-                    } label: {
-                        Label("知识地图", systemImage: "point.3.connected.trianglepath.dotted")
-                    }
-                }
-
                 Button {
                     rightPanel = .chat
                     isInspectorVisible.toggle()

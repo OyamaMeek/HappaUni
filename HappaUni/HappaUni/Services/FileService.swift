@@ -128,6 +128,14 @@ struct FileService {
         return directory
     }
 
+    /// Keeps the shared Documents container visible in the Files app even before
+    /// the first user import. Imported documents remain directly under /Documents.
+    func prepareSharedDocumentsDirectory() throws {
+        let directory = try documentsDirectory()
+        let libraryFolder = directory.appendingPathComponent("资料库", isDirectory: true)
+        try FileManager.default.createDirectory(at: libraryFolder, withIntermediateDirectories: true)
+    }
+
     /// Moves files imported by earlier versions from Documents/Library to Documents.
     /// The returned mapping lets callers repair persisted absolute file paths.
     func migrateLegacyLibraryDirectory() throws -> [String: String] {

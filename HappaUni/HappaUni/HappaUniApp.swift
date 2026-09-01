@@ -17,6 +17,10 @@ struct HappaUniApp: App {
         }
     }()
 
+    init() {
+        try? FileService().prepareSharedDocumentsDirectory()
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
