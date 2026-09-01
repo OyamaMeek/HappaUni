@@ -72,3 +72,25 @@
 - **Git 提交**：`03bb7a8 feat: add trash and WebDAV backup controls`
 
 ---
+## [2026-09-01 18:53] AI 公式渲染与系统提示词
+
+- **需求/问题描述**：
+  > AI 回复要完美渲染各种 LaTex 格式，设置里支持填写系统提示词。
+
+- **实际实现的功能与改动**：
+  - [公式渲染]：AI 回复改用 MathJax WebView 渲染，支持 `$...$`、`$$...$$`、`\(...\)`、`\[...\]` 以及 aligned、matrix、cases、equation 等常用 LaTex 环境。
+  - [自适应排版]：公式容器根据内容高度自动调整；过宽的独立公式可横向滚动，避免截断。
+  - [系统提示词]：设置页新增可持久保存的“系统提示词”多行输入框；留空时沿用内置提示词，填写后会与当前文档上下文共同发送给 AI。
+  - [输出约束]：内置提示词要求 AI 以可渲染的 LaTex 分隔符输出公式，减少公式被代码块包裹的情况。
+  - [测试/验证]：`git diff --check` 通过；iPhone Simulator Debug 构建及测试目标构建成功。
+
+- **涉及文件**：
+  - `HappaUni/HappaUni/Services/AIService.swift` (+25)
+  - `HappaUni/HappaUni/Views/AIChatView.swift` (+10 / -3)
+  - `HappaUni/HappaUni/Views/AIResponseMathView.swift` (+133)
+  - `HappaUni/HappaUni/Views/SettingsView.swift` (+15)
+  - `HappaUni/HappaUniTests/HappaUniTests.swift` (+25)
+
+- **Git 提交**：`c5dcfe5 feat: render AI LaTeX responses`
+
+---
