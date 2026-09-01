@@ -22,6 +22,7 @@ struct ContentView: View {
     @State private var errorMessage: String?
     @State private var searchText = ""
     @State private var selectedFolderID: UUID?
+    @State private var isBrowsingFolder = false
     @State private var isShowingAddFolder = false
     @State private var newFolderParentID: UUID?
     @State private var outlineDestination: DocumentOutlineItem.Destination?
@@ -41,6 +42,14 @@ struct ContentView: View {
 
     private var selectedDocument: LibraryDocument? {
         documents.first { $0.persistentModelID == selectedDocumentID }
+    }
+
+    private var selectedFolderDocuments: [LibraryDocument] {
+        guard let selectedFolderID else {
+            return filteredDocuments.filter { $0.folderID == nil }
+        }
+        let folderIDs = FolderTreeBuilder.descendantIDs(of: selectedFolderID, in: folders)
+        return filteredDocuments.filter { $0.folderID.map(folderIDs.contains) ?? false }
     }
 
     private var selectedDocumentSupportsOutline: Bool {
@@ -74,6 +83,12 @@ struct ContentView: View {
                     document: selectedDocument,
                     onBack: { selectedDocumentID = nil },
                     outlineDestination: $outlineDestination
+                )
+            } else if isBrowsingFolder {
+                FolderLibraryView(
+                    title: selectedFolderID.flatMap { id in folders.first(where: { $0.id == id })?.name } ?? "未归档",
+                    documents: selectedFolderDocuments,
+                    onSelect: { selectedDocumentID = $0.persistentModelID }
                 )
             } else {
                 WelcomeView(onImport: { isImporting = true })
@@ -237,7 +252,9 @@ struct ContentView: View {
 
             Section {
                 Button {
+                    selectedDocumentID = nil
                     selectedFolderID = nil
+                    isBrowsingFolder = true
                 } label: {
                     FolderSidebarRow(
                         name: "未归档",
@@ -254,6 +271,7 @@ struct ContentView: View {
                     allFolders: folders,
                     selectedFolderID: $selectedFolderID,
                     selectedDocumentID: $selectedDocumentID,
+                    isBrowsingFolder: $isBrowsingFolder,
                     editingDocument: $editingDocument,
                     onAddSubfolder: { folder in
                         newFolderParentID = folder.id
@@ -289,6 +307,7 @@ struct ContentView: View {
             HStack(spacing: 0) {
                 Button {
                     selectedFolderID = nil
+                    isBrowsingFolder = false
                     searchText = ""
                 } label: {
                     VStack(spacing: 6) {
@@ -561,6 +580,7 @@ private struct FolderTreeRows: View {
     let allFolders: [LibraryFolder]
     @Binding var selectedFolderID: UUID?
     @Binding var selectedDocumentID: PersistentIdentifier?
+    @Binding var isBrowsingFolder: Bool
     @Binding var editingDocument: LibraryDocument?
     let onAddSubfolder: (LibraryFolder) -> Void
     let onDeleteFolder: (LibraryFolder) -> Void
@@ -585,6 +605,7 @@ private struct FolderTreeRows: View {
                     allFolders: allFolders,
                     selectedFolderID: $selectedFolderID,
                     selectedDocumentID: $selectedDocumentID,
+                    isBrowsingFolder: $isBrowsingFolder,
                     editingDocument: $editingDocument,
                     onAddSubfolder: onAddSubfolder,
                     onDeleteFolder: onDeleteFolder,
@@ -592,7 +613,11 @@ private struct FolderTreeRows: View {
                     onDeleteDocument: onDeleteDocument
                 )
             } label: {
-                Button { selectedFolderID = node.folder.id } label: {
+                Button {
+                    selectedDocumentID = nil
+                    selectedFolderID = node.folder.id
+                    isBrowsingFolder = true
+                } label: {
                     FolderSidebarRow(
                         name: node.folder.name,
                         color: FolderAccent.color(for: node.folder.id),
@@ -812,6 +837,67 @@ private struct DocumentRow: View {
 
     private var iconColor: Color {
         switch document.type {
+        case .pdf: .red
+        case .markdown, .tex, .text: .blue
+        case .epub: .orange
+        case .image: .purple
+        case .other: .secondary
+        }
+    }
+}
+
+
+private struct FolderLibraryView: View {
+    let title: String
+    let documents: [LibraryDocument]
+    let onSelect: (LibraryDocument) -> Void
+
+    private let columns = [GridItem(.adaptive(minimum: 150), spacing: 18)]
+
+    var body: some View {
+        Group {
+            if documents.isEmpty {
+                ContentUnavailableView(
+                    "\(title)为空",
+                    systemImage: "folder",
+                    description: Text("导入文件时可将资料放入此文件夹。")
+                )
+            } else {
+                ScrollView {
+                    LazyVGrid(columns: columns, spacing: 18) {
+                        ForEach(documents) { document in
+                            Button { onSelect(document) } label: {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Image(systemName: document.type.iconName)
+                                        .font(.system(size: 34, weight: .medium))
+                                        .foregroundStyle(folderDocumentColor(for: document.type))
+                                        .frame(maxWidth: .infinity, minHeight: 110)
+                                        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                    Text(document.name)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(2)
+                                    Text(document.modifiedAt.formatted(date: .abbreviated, time: .omitted))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(12)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                                .overlay { RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(.white.opacity(0.12), lineWidth: 1) }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(24)
+                }
+            }
+        }
+        .navigationTitle(title)
+    }
+
+    private func folderDocumentColor(for type: DocumentType) -> Color {
+        switch type {
         case .pdf: .red
         case .markdown, .tex, .text: .blue
         case .epub: .orange
