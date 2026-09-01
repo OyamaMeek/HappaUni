@@ -11,8 +11,8 @@
   - [测试/验证]：`xcodebuild` iPhone Simulator Debug 构建成功；已安装并启动模拟器应用；`git diff --check` 通过。
 
 - **涉及文件**：
-  - `HappaUni/HappaUni/ContentView.swift` (+184 / -41)
-  - `HappaUni/HappaUni/Services/SyncService.swift` (+106 / -64)
+  - `HappaUni/HappaUni/ContentView.swift` (+186 / -31)
+  - `HappaUni/HappaUni/Services/SyncService.swift` (+104 / -74)
 
 - **Git 提交**：`4cc5345 feat: organize import and backup folders`
 
