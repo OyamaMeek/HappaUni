@@ -28,8 +28,8 @@
   - [测试/验证]：Debug 构建成功，并安装启动 iPad 模拟器验证应用正常运行。
 
 - **涉及文件**：
-  -  (+87 / -1)
+  - `HappaUni/HappaUni/ContentView.swift` (+87 / -1)
 
-- **Git 提交**：
+- **Git 提交**：`4402c22 fix: show selected folder documents`
 
 ---
