@@ -9,6 +9,7 @@ struct AIChatView: View {
     @Query(sort: \AIConversationMessage.createdAt) private var storedMessages: [AIConversationMessage]
     @AppStorage("ai.baseURL") private var baseURLString = "https://api.openai.com/v1"
     @AppStorage("ai.model") private var model = "gpt-4o-mini"
+    @AppStorage(AISettings.systemPromptKey) private var customSystemPrompt = ""
     @State private var messages: [AIMessage] = []
     @State private var conversationID: UUID?
     @State private var draft = ""
@@ -185,7 +186,11 @@ struct AIChatView: View {
     private var systemPrompt: String {
         let context = AIContextExtractor.text(for: document)
         let source = context.isEmpty ? "当前文件不含可直接提取的纯文本，请基于用户的问题说明可做的操作。" : context
-        return "你是 HappaUni 的文档助手。请用中文回答，并严格依据下列文档内容；不确定时说明不确定。\n\n文档：\(document.name)\n\n内容：\n\(source)"
+        return AISettings.documentAssistantPrompt(
+            customPrompt: customSystemPrompt,
+            documentName: document.name,
+            documentContent: source
+        )
     }
 }
 
@@ -195,8 +200,7 @@ private struct MessageBubble: View {
     var body: some View {
         HStack {
             if message.role == .assistant {
-                Text(message.content)
-                    .textSelection(.enabled)
+                AIResponseMathView(content: message.content)
                     .padding(12)
                     .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
                 Spacer(minLength: 44)

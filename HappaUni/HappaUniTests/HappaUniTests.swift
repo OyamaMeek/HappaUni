@@ -197,6 +197,31 @@ struct HappaUniTests {
         #expect(value == "…efghij")
     }
 
+    @Test("AI responses configure MathJax for inline and display LaTeX")
+    func configuresAIResponseMathRenderer() {
+        let html = AIMathRenderer.html(for: #"行内 \(x^2\)，块级 \[\begin{aligned}a&=b\end{aligned}\]"#)
+
+        #expect(html.contains("tex-mml-chtml.js"))
+        #expect(html.contains("inlineMath"))
+        #expect(html.contains("displayMath"))
+        #expect(html.contains("mathtools"))
+        #expect(html.contains(#"\begin{aligned}"#))
+    }
+
+    @Test("Custom system prompt is combined with document context and math guidance")
+    func combinesCustomSystemPrompt() {
+        let prompt = AISettings.documentAssistantPrompt(
+            customPrompt: "请简洁回答。",
+            documentName: "数学笔记",
+            documentContent: "泰勒展开"
+        )
+
+        #expect(prompt.contains("请简洁回答。"))
+        #expect(prompt.contains("数学笔记"))
+        #expect(prompt.contains("泰勒展开"))
+        #expect(prompt.contains(#"\( ... \)"#))
+    }
+
     @Test("Document outline extracts Markdown headings with matching anchors")
     func extractsMarkdownOutline() {
         let items = DocumentOutlineExtractor.markdownItems(source: "# 课程\n正文\n## 第一讲\n### 重点")

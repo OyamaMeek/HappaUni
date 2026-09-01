@@ -20,6 +20,31 @@ struct AIConfiguration: Codable, Equatable {
     static let `default` = AIConfiguration(apiKey: "", baseURL: URL(string: "https://api.openai.com/v1")!, model: "gpt-4o-mini")
 }
 
+enum AISettings {
+    static let systemPromptKey = "ai.systemPrompt"
+
+    static func documentAssistantPrompt(
+        customPrompt: String,
+        documentName: String,
+        documentContent: String
+    ) -> String {
+        let instructions = customPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseInstructions = instructions.isEmpty
+            ? "你是 HappaUni 的文档助手。请用中文回答，并严格依据下列文档内容；不确定时说明不确定。"
+            : instructions
+        return """
+        \(baseInstructions)
+
+        回答中的数学公式请使用 LaTex：行内公式使用 \\( ... \\)，独立公式使用 \\[ ... \\]；可使用 aligned、matrix、cases、equation 等环境。不要把公式放进 Markdown 代码块。
+
+        文档：\(documentName)
+
+        内容：
+        \(documentContent)
+        """
+    }
+}
+
 enum AIContextExtractor {
     static func truncate(_ text: String, maximumCharacters: Int = 12_000) -> String {
         guard maximumCharacters > 0, text.count > maximumCharacters else { return text }

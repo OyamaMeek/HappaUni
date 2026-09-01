@@ -9,6 +9,7 @@ struct SettingsView: View {
     @AppStorage("aiConfigured") private var aiConfigured = false
     @AppStorage("ai.baseURL") private var aiBaseURL = "https://api.openai.com/v1"
     @AppStorage("ai.model") private var aiModel = "gpt-4o-mini"
+    @AppStorage(AISettings.systemPromptKey) private var aiSystemPrompt = ""
     @AppStorage("githubConnected") private var githubConnected = false
     @AppStorage("github.repository") private var repository = "HappaUni-sync"
     @AppStorage(WebDAVBackupSettings.enabledKey) private var webDAVBackupEnabled = true
@@ -34,6 +35,20 @@ struct SettingsView: View {
                     TextField("模型", text: $aiModel)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("系统提示词（可选）")
+                            .font(.subheadline)
+                        TextEditor(text: $aiSystemPrompt)
+                            .frame(minHeight: 130)
+                            .font(.body)
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(.secondary.opacity(0.3), lineWidth: 1)
+                            }
+                        Text("留空时使用内置文档助手提示词；填写后会作为 AI 问答的系统提示词，并自动保存。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                     Button("保存 AI 设置", action: saveAIConfiguration)
                     Text(aiConfigured ? "API Key 已保存在本机钥匙串。" : "配置后可在文档阅读页使用 AI 问答。")
                         .font(.footnote)
