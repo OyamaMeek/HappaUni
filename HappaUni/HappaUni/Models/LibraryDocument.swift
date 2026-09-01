@@ -94,7 +94,28 @@ final class LibraryDocument {
         self.folderID = folderID
     }
 
-    var url: URL { URL(fileURLWithPath: path) }
+    /// Resolves legacy absolute paths after a reinstall or an app-container change.
+    /// Imported files are now kept directly in the app's Documents directory.
+    var url: URL {
+        let persistedURL = URL(fileURLWithPath: path)
+        let fileManager = FileManager.default
+        guard !fileManager.fileExists(atPath: persistedURL.path),
+              let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first
+        else {
+            return persistedURL
+        }
+
+        let currentLocation = documentsDirectory.appendingPathComponent(persistedURL.lastPathComponent)
+        if fileManager.fileExists(atPath: currentLocation.path) {
+            return currentLocation
+        }
+
+        // Keep older installs readable until ContentView migrates the file.
+        let legacyLocation = documentsDirectory
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent(persistedURL.lastPathComponent)
+        return fileManager.fileExists(atPath: legacyLocation.path) ? legacyLocation : persistedURL
+    }
     var tags: [String] {
         get { tagsRawValue.split(separator: "\u{1F}").map(String.init) }
         set { tagsRawValue = Self.normalizedTags(newValue).joined(separator: "\u{1F}") }

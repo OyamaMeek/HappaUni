@@ -35,7 +35,7 @@ struct FileService {
 
     func importDocument(from sourceURL: URL, preferredFilename: String? = nil) throws -> LibraryDocument {
         guard let preferredFilename else {
-            let importedFile = try importFiles([sourceURL], into: libraryDirectory())[0]
+            let importedFile = try importFiles([sourceURL], into: documentsDirectory())[0]
             return importedFile.makeDocument()
         }
 
@@ -47,7 +47,7 @@ struct FileService {
 
         try FileManager.default.createDirectory(at: stagingDirectory, withIntermediateDirectories: true)
         try FileManager.default.copyItem(at: sourceURL, to: renamedSourceURL)
-        let importedFile = try importFiles([renamedSourceURL], into: libraryDirectory())[0]
+        let importedFile = try importFiles([renamedSourceURL], into: documentsDirectory())[0]
         return importedFile.makeDocument()
     }
 
@@ -105,7 +105,7 @@ struct FileService {
     func restoreDocument(data: Data, filename: String, id: UUID, gitSHA: String) throws -> LibraryDocument {
         let type = DocumentType.detect(from: filename)
         guard Self.supportedTypes.contains(type) else { throw FileServiceError.unsupportedFile }
-        let destination = uniqueURL(in: try libraryDirectory(), filename: filename)
+        let destination = uniqueURL(in: try documentsDirectory(), filename: filename)
         try data.write(to: destination, options: .atomic)
         let document = LibraryDocument(name: destination.lastPathComponent, url: destination, type: type, size: Int64(data.count))
         document.id = id
@@ -116,17 +116,58 @@ struct FileService {
     }
 
     func delete(_ document: LibraryDocument) throws {
-        guard FileManager.default.fileExists(atPath: document.path) else { return }
+        guard FileManager.default.fileExists(atPath: document.url.path) else { return }
         try FileManager.default.removeItem(at: document.url)
     }
 
-    func libraryDirectory() throws -> URL {
+    func documentsDirectory() throws -> URL {
         guard let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
             throw FileServiceError.documentsDirectoryUnavailable
         }
-        let library = directory.appendingPathComponent("Library", isDirectory: true)
-        try FileManager.default.createDirectory(at: library, withIntermediateDirectories: true)
-        return library
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
+    /// Moves files imported by earlier versions from Documents/Library to Documents.
+    /// The returned mapping lets callers repair persisted absolute file paths.
+    func migrateLegacyLibraryDirectory() throws -> [String: String] {
+        let fileManager = FileManager.default
+        let documents = try documentsDirectory()
+        let legacyDirectory = documents.appendingPathComponent("Library", isDirectory: true)
+        guard fileManager.fileExists(atPath: legacyDirectory.path) else { return [:] }
+
+        var migratedPaths: [String: String] = [:]
+        let contents = try fileManager.contentsOfDirectory(
+            at: legacyDirectory,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )
+
+        for sourceURL in contents {
+            let values = try sourceURL.resourceValues(forKeys: [.isDirectoryKey])
+            guard values.isDirectory != true else { continue }
+
+            let destinationURL = uniqueURL(in: documents, filename: sourceURL.lastPathComponent)
+            try fileManager.moveItem(at: sourceURL, to: destinationURL)
+            migratedPaths[sourceURL.path] = destinationURL.path
+        }
+
+        if (try? fileManager.contentsOfDirectory(atPath: legacyDirectory.path).isEmpty) == true {
+            try? fileManager.removeItem(at: legacyDirectory)
+        }
+        return migratedPaths
+    }
+
+    func resolvedURL(for document: LibraryDocument) -> URL? {
+        let fileManager = FileManager.default
+        let resolvedURL = document.url
+        guard fileManager.fileExists(atPath: resolvedURL.path) else { return nil }
+        return resolvedURL
+    }
+
+    /// Compatibility alias for existing callers. It now returns Documents, not Documents/Library.
+    func libraryDirectory() throws -> URL {
+        try documentsDirectory()
     }
 
     private func uniqueURL(in directory: URL, filename: String) -> URL {

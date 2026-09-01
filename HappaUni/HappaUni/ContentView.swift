@@ -87,6 +87,9 @@ struct ContentView: View {
         .sheet(isPresented: $isShowingSettings) {
             SettingsView()
         }
+        .task {
+            repairStoredDocumentLocations()
+        }
         .task(id: selectedDocumentID) {
             outlineDestination = nil
             guard let selectedDocument else { return }
@@ -291,7 +294,7 @@ struct ContentView: View {
             }
 
             let fileService = FileService()
-            let importedFiles = try fileService.importFiles(sourceURLs, into: fileService.libraryDirectory())
+            let importedFiles = try fileService.importFiles(sourceURLs, into: fileService.documentsDirectory())
             let importedDocuments = importedFiles.map { $0.makeDocument(folderID: selectedFolderID) }
 
             for document in importedDocuments {
@@ -314,6 +317,31 @@ struct ContentView: View {
 
     private func deleteDocuments(at offsets: IndexSet) {
         for index in offsets { delete(filteredDocuments[index]) }
+    }
+
+    private func repairStoredDocumentLocations() {
+        do {
+            let fileService = FileService()
+            let migratedPaths = try fileService.migrateLegacyLibraryDirectory()
+            var didChange = false
+
+            for document in documents {
+                if let migratedPath = migratedPaths[document.path], document.path != migratedPath {
+                    document.path = migratedPath
+                    didChange = true
+                } else if let resolvedURL = fileService.resolvedURL(for: document),
+                          document.path != resolvedURL.path {
+                    document.path = resolvedURL.path
+                    didChange = true
+                }
+            }
+
+            if didChange {
+                try modelContext.save()
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func delete(_ document: LibraryDocument) {
