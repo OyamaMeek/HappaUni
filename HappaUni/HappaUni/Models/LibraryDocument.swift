@@ -63,6 +63,7 @@ final class LibraryDocument {
     var gitLastSyncAt: Date?
     var isFavorite: Bool
     var isArchived: Bool = false
+    var trashedAt: Date?
     var tagsRawValue: String
     var folderID: UUID?
     var lastReadPage: Int = 1
@@ -78,6 +79,7 @@ final class LibraryDocument {
         isSyncedToGitHub: Bool = false,
         isFavorite: Bool = false,
         isArchived: Bool = false,
+        trashedAt: Date? = nil,
         tags: [String] = [],
         folderID: UUID? = nil
     ) {
@@ -91,6 +93,7 @@ final class LibraryDocument {
         self.isSyncedToGitHub = isSyncedToGitHub
         self.isFavorite = isFavorite
         self.isArchived = isArchived
+        self.trashedAt = trashedAt
         self.tagsRawValue = Self.normalizedTags(tags).joined(separator: "\u{1F}")
         self.folderID = folderID
     }
@@ -122,6 +125,7 @@ final class LibraryDocument {
         set { tagsRawValue = Self.normalizedTags(newValue).joined(separator: "\u{1F}") }
     }
     var type: DocumentType { DocumentType(rawValue: typeRawValue) ?? .other }
+    var isInTrash: Bool { trashedAt != nil }
     var formattedSize: String {
         ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
     }

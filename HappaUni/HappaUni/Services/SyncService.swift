@@ -34,9 +34,13 @@ struct RestoreSummary: Equatable {
 
 enum LibraryRemotePath {
     static let unfiledDirectory = "未归档"
+    static let trashDirectory = "废纸篓"
     static let manifestPath = ".happauni-library.json"
 
     static func documentPath(for document: LibraryDocument, folders: [LibraryFolder]) -> String {
+        if document.isInTrash {
+            return [trashDirectory, safeComponent(document.name)].joined(separator: "/")
+        }
         let directory = folderComponents(for: document.folderID, folders: folders).joined(separator: "/")
         return [directory, safeComponent(document.name)].joined(separator: "/")
     }
@@ -79,6 +83,7 @@ struct LibraryBackupManifest: Codable, Equatable {
         let isFavorite: Bool
         let createdAt: Date
         let modifiedAt: Date
+        let trashedAt: Date?
         let name: String?
         let remotePath: String?
 
@@ -89,6 +94,7 @@ struct LibraryBackupManifest: Codable, Equatable {
             isFavorite = document.isFavorite
             createdAt = document.createdAt
             modifiedAt = document.modifiedAt
+            trashedAt = document.trashedAt
             name = document.name
             remotePath = LibraryRemotePath.documentPath(for: document, folders: folders)
         }
@@ -114,10 +120,18 @@ struct LibraryBackupManifest: Codable, Equatable {
     let folders: [Folder]
 
     init(documents: [LibraryDocument], folders: [LibraryFolder], exportedAt: Date = .now) {
-        schemaVersion = 2
+        schemaVersion = 3
         self.exportedAt = exportedAt
         self.documents = documents.map { Document($0, folders: folders) }
         self.folders = folders.map(Folder.init)
+    }
+}
+
+enum WebDAVBackupSettings {
+    static let enabledKey = "webDAVBackupEnabled"
+
+    static var isEnabled: Bool {
+        UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? true
     }
 }
 
@@ -179,6 +193,7 @@ final class SyncService {
             // WebDAV synchronization below remains available when GitHub is offline.
         }
 
+        guard WebDAVBackupSettings.isEnabled, !document.isInTrash else { return }
         for account in webDAVAccounts {
             try? await upload(document, folders: folders, to: account)
         }
@@ -300,6 +315,7 @@ final class SyncService {
             document.tags = metadata.tags
             document.folderID = metadata.folderID
             document.isFavorite = metadata.isFavorite
+            document.trashedAt = metadata.trashedAt
         }
     }
 }

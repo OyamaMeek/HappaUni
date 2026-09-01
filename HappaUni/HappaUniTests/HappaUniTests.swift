@@ -271,10 +271,24 @@ struct HappaUniTests {
         )
         let manifest = LibraryBackupManifest(documents: [document], folders: [folder])
 
-        #expect(manifest.schemaVersion == 1)
+        #expect(manifest.schemaVersion == 3)
         #expect(manifest.documents[0].folderID == folder.id)
         #expect(manifest.documents[0].tags == ["数学"])
         #expect(manifest.folders[0].name == "课程")
+    }
+
+    @Test("Trash documents use the dedicated GitHub backup folder")
+    func usesTrashRemotePath() {
+        let document = LibraryDocument(
+            name: "paper.pdf",
+            url: URL(fileURLWithPath: "/tmp/paper.pdf"),
+            type: .pdf,
+            size: 10,
+            trashedAt: .now
+        )
+
+        #expect(document.isInTrash)
+        #expect(LibraryRemotePath.documentPath(for: document, folders: []) == "废纸篓/paper.pdf")
     }
 
     @Test("WebDAV cache keeps distinct remote files with the same filename")

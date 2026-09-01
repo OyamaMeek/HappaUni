@@ -24,6 +24,7 @@ struct ContentView: View {
     @State private var searchText = ""
     @State private var selectedFolderID: UUID?
     @State private var isBrowsingFolder = false
+    @State private var isBrowsingTrash = false
     @State private var isShowingAddFolder = false
     @State private var newFolderParentID: UUID?
     @State private var outlineDestination: DocumentOutlineItem.Destination?
@@ -33,12 +34,16 @@ struct ContentView: View {
     private var folderNodes: [FolderTreeNode] { FolderTreeBuilder.make(from: folders) }
     private var filteredDocuments: [LibraryDocument] {
         documents.filter { document in
-            !document.isArchived && matchesSearch(document)
+            !document.isArchived && !document.isInTrash && matchesSearch(document)
         }
     }
 
     private var archivedDocuments: [LibraryDocument] {
-        documents.filter { $0.isArchived && matchesSearch($0) }
+        documents.filter { $0.isArchived && !$0.isInTrash && matchesSearch($0) }
+    }
+
+    private var trashedDocuments: [LibraryDocument] {
+        documents.filter { $0.isInTrash && matchesSearch($0) }
     }
 
     private var selectedDocument: LibraryDocument? {
@@ -82,11 +87,27 @@ struct ContentView: View {
                     onBack: { selectedDocumentID = nil },
                     outlineDestination: $outlineDestination
                 )
+            } else if isBrowsingTrash {
+                FolderLibraryView(
+                    title: "废纸篓",
+                    documents: trashedDocuments,
+                    folders: folders,
+                    onSelect: { selectedDocumentID = $0.persistentModelID },
+                    onArchive: moveToFolder,
+                    onDelete: moveToTrash,
+                    onRestore: restoreFromTrash,
+                    onPermanentlyDelete: permanentlyDelete
+                )
             } else if isBrowsingFolder {
                 FolderLibraryView(
                     title: selectedFolderID.flatMap { id in folders.first(where: { $0.id == id })?.name } ?? "未归档",
                     documents: selectedFolderDocuments,
-                    onSelect: { selectedDocumentID = $0.persistentModelID }
+                    folders: folders,
+                    onSelect: { selectedDocumentID = $0.persistentModelID },
+                    onArchive: moveToFolder,
+                    onDelete: moveToTrash,
+                    onRestore: restoreFromTrash,
+                    onPermanentlyDelete: permanentlyDelete
                 )
             } else {
                 WelcomeView(onImport: { isImporting = true })
@@ -114,6 +135,7 @@ struct ContentView: View {
         }
         .task {
             repairStoredDocumentLocations()
+            purgeExpiredTrash()
         }
         .task(id: selectedDocumentID) {
             outlineDestination = nil
@@ -136,7 +158,11 @@ struct ContentView: View {
             synchronizeEditedDocument(document)
         }
         .onChange(of: scenePhase) { _, newPhase in
-            guard newPhase != .active, let selectedDocument else { return }
+            if newPhase == .active {
+                purgeExpiredTrash()
+                return
+            }
+            guard let selectedDocument else { return }
             synchronizeEditedDocument(selectedDocument)
         }
         .sheet(isPresented: $isShowingAddWebDAV) {
@@ -253,6 +279,7 @@ struct ContentView: View {
                     selectedDocumentID = nil
                     selectedFolderID = nil
                     isBrowsingFolder = true
+                    isBrowsingTrash = false
                 } label: {
                     FolderSidebarRow(
                         name: "未归档",
@@ -270,14 +297,17 @@ struct ContentView: View {
                     selectedFolderID: $selectedFolderID,
                     selectedDocumentID: $selectedDocumentID,
                     isBrowsingFolder: $isBrowsingFolder,
+                    isBrowsingTrash: $isBrowsingTrash,
                     editingDocument: $editingDocument,
                     onAddSubfolder: { folder in
                         newFolderParentID = folder.id
                         isShowingAddFolder = true
                     },
                     onDeleteFolder: deleteFolder,
-                    onArchiveDocument: archive,
-                    onDeleteDocument: delete
+                    onArchiveDocument: moveToFolder,
+                    onDeleteDocument: moveToTrash,
+                    onRestoreDocument: restoreFromTrash,
+                    onPermanentlyDeleteDocument: permanentlyDelete
                 )
             } header: {
                 HStack {
@@ -298,6 +328,19 @@ struct ContentView: View {
                     }
                 }
             }
+
+            Section {
+                Button {
+                    selectedDocumentID = nil
+                    isBrowsingFolder = false
+                    isBrowsingTrash = true
+                } label: {
+                    Label("废纸篓", systemImage: "trash")
+                }
+                .buttonStyle(.plain)
+            } footer: {
+                Text("废纸篓中的文件会在 7 天后自动清理，仅备份到 GitHub。")
+            }
         }
         .searchable(text: $searchText, prompt: "搜索文件")
         .listStyle(.sidebar)
@@ -306,6 +349,7 @@ struct ContentView: View {
                 Button {
                     selectedFolderID = nil
                     isBrowsingFolder = false
+                    isBrowsingTrash = false
                     searchText = ""
                 } label: {
                     VStack(spacing: 6) {
@@ -356,9 +400,12 @@ struct ContentView: View {
     private func documentRow(_ document: LibraryDocument) -> some View {
         LibrarySidebarDocumentRow(
             document: document,
+            folders: folders,
             editingDocument: $editingDocument,
-            onArchive: archive,
-            onDelete: delete
+            onArchive: moveToFolder,
+            onDelete: moveToTrash,
+            onRestore: restoreFromTrash,
+            onPermanentlyDelete: permanentlyDelete
         )
             .tag(document.persistentModelID)
     }
@@ -436,7 +483,7 @@ struct ContentView: View {
     }
 
     private func deleteDocuments(at offsets: IndexSet) {
-        for index in offsets { delete(filteredDocuments[index]) }
+        for index in offsets { moveToTrash(filteredDocuments[index]) }
     }
 
     private func repairStoredDocumentLocations() {
@@ -464,7 +511,7 @@ struct ContentView: View {
         }
     }
 
-    private func delete(_ document: LibraryDocument) {
+    private func permanentlyDelete(_ document: LibraryDocument) {
         do {
             try FileService().delete(document)
             if selectedDocumentID == document.persistentModelID { selectedDocumentID = nil }
@@ -475,13 +522,49 @@ struct ContentView: View {
         }
     }
 
-    private func archive(_ document: LibraryDocument) {
+    private func moveToFolder(_ document: LibraryDocument, folderID: UUID?) {
         do {
-            document.isArchived.toggle()
+            document.folderID = folderID
+            document.isArchived = false
+            document.trashedAt = nil
             document.modifiedAt = .now
-            if document.isArchived && selectedDocumentID == document.persistentModelID {
+            try modelContext.save()
+            synchronizeEditedDocument(document)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func moveToTrash(_ document: LibraryDocument) {
+        do {
+            document.isArchived = false
+            document.trashedAt = .now
+            document.modifiedAt = .now
+            if selectedDocumentID == document.persistentModelID {
                 selectedDocumentID = nil
             }
+            try modelContext.save()
+            synchronizeEditedDocument(document)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func restoreFromTrash(_ document: LibraryDocument, folderID: UUID?) {
+        moveToFolder(document, folderID: folderID)
+    }
+
+    private func purgeExpiredTrash() {
+        let expirationDate = Calendar.current.date(byAdding: .day, value: -7, to: .now) ?? .distantPast
+        for document in documents where (document.trashedAt ?? .distantFuture) <= expirationDate {
+            do {
+                try FileService().delete(document)
+                modelContext.delete(document)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+        do {
             try modelContext.save()
         } catch {
             errorMessage = error.localizedDescription
@@ -582,11 +665,14 @@ private struct FolderTreeRows: View {
     @Binding var selectedFolderID: UUID?
     @Binding var selectedDocumentID: PersistentIdentifier?
     @Binding var isBrowsingFolder: Bool
+    @Binding var isBrowsingTrash: Bool
     @Binding var editingDocument: LibraryDocument?
     let onAddSubfolder: (LibraryFolder) -> Void
     let onDeleteFolder: (LibraryFolder) -> Void
-    let onArchiveDocument: (LibraryDocument) -> Void
+    let onArchiveDocument: (LibraryDocument, UUID?) -> Void
     let onDeleteDocument: (LibraryDocument) -> Void
+    let onRestoreDocument: (LibraryDocument, UUID?) -> Void
+    let onPermanentlyDeleteDocument: (LibraryDocument) -> Void
 
     var body: some View {
         ForEach(nodes) { node in
@@ -594,9 +680,12 @@ private struct FolderTreeRows: View {
                 ForEach(documents.filter { $0.folderID == node.folder.id }) { document in
                     LibrarySidebarDocumentRow(
                         document: document,
+                        folders: allFolders,
                         editingDocument: $editingDocument,
                         onArchive: onArchiveDocument,
-                        onDelete: onDeleteDocument
+                        onDelete: onDeleteDocument,
+                        onRestore: onRestoreDocument,
+                        onPermanentlyDelete: onPermanentlyDeleteDocument
                     )
                     .tag(document.persistentModelID)
                 }
@@ -607,17 +696,21 @@ private struct FolderTreeRows: View {
                     selectedFolderID: $selectedFolderID,
                     selectedDocumentID: $selectedDocumentID,
                     isBrowsingFolder: $isBrowsingFolder,
+                    isBrowsingTrash: $isBrowsingTrash,
                     editingDocument: $editingDocument,
                     onAddSubfolder: onAddSubfolder,
                     onDeleteFolder: onDeleteFolder,
                     onArchiveDocument: onArchiveDocument,
-                    onDeleteDocument: onDeleteDocument
+                    onDeleteDocument: onDeleteDocument,
+                    onRestoreDocument: onRestoreDocument,
+                    onPermanentlyDeleteDocument: onPermanentlyDeleteDocument
                 )
             } label: {
                 Button {
                     selectedDocumentID = nil
                     selectedFolderID = node.folder.id
                     isBrowsingFolder = true
+                    isBrowsingTrash = false
                 } label: {
                     FolderSidebarRow(
                         name: node.folder.name,
@@ -676,9 +769,12 @@ private enum FolderAccent {
 
 private struct LibrarySidebarDocumentRow: View {
     let document: LibraryDocument
+    let folders: [LibraryFolder]
     @Binding var editingDocument: LibraryDocument?
-    let onArchive: (LibraryDocument) -> Void
+    let onArchive: (LibraryDocument, UUID?) -> Void
     let onDelete: (LibraryDocument) -> Void
+    let onRestore: (LibraryDocument, UUID?) -> Void
+    let onPermanentlyDelete: (LibraryDocument) -> Void
 
     var body: some View {
         DocumentRow(document: document)
@@ -688,20 +784,86 @@ private struct LibrarySidebarDocumentRow: View {
                 } label: {
                     Label("编辑标签", systemImage: "tag")
                 }
-                Button {
-                    onArchive(document)
-                } label: {
-                    Label(
-                        document.isArchived ? "取消归档" : "归档",
-                        systemImage: document.isArchived ? "tray.and.arrow.up" : "archivebox"
-                    )
-                }
-                Button(role: .destructive) {
-                    onDelete(document)
-                } label: {
-                    Label("删除", systemImage: "trash")
-                }
+                DocumentContextActions(
+                    document: document,
+                    folders: folders,
+                    onArchive: onArchive,
+                    onDelete: onDelete,
+                    onRestore: onRestore,
+                    onPermanentlyDelete: onPermanentlyDelete
+                )
             }
+    }
+}
+
+private struct DocumentContextActions: View {
+    let document: LibraryDocument
+    let folders: [LibraryFolder]
+    let onArchive: (LibraryDocument, UUID?) -> Void
+    let onDelete: (LibraryDocument) -> Void
+    let onRestore: (LibraryDocument, UUID?) -> Void
+    let onPermanentlyDelete: (LibraryDocument) -> Void
+
+    var body: some View {
+        if document.isInTrash {
+            FolderDestinationMenu(title: "恢复到", systemImage: "arrow.uturn.backward", folders: folders) { folderID in
+                onRestore(document, folderID)
+            }
+            Button(role: .destructive) {
+                onPermanentlyDelete(document)
+            } label: {
+                Label("立即删除", systemImage: "trash.slash")
+            }
+        } else {
+            FolderDestinationMenu(title: "归档到", systemImage: "archivebox", folders: folders) { folderID in
+                onArchive(document, folderID)
+            }
+            Button(role: .destructive) {
+                onDelete(document)
+            } label: {
+                Label("删除", systemImage: "trash")
+            }
+        }
+    }
+}
+
+private struct FolderDestinationMenu: View {
+    let title: String
+    let systemImage: String
+    let folders: [LibraryFolder]
+    let onSelect: (UUID?) -> Void
+
+    var body: some View {
+        Menu {
+            Button {
+                onSelect(nil)
+            } label: {
+                Label("未归档", systemImage: "tray")
+            }
+            FolderDestinationMenuRows(nodes: FolderTreeBuilder.make(from: folders), onSelect: onSelect)
+        } label: {
+            Label(title, systemImage: systemImage)
+        }
+    }
+}
+
+private struct FolderDestinationMenuRows: View {
+    let nodes: [FolderTreeNode]
+    let onSelect: (UUID) -> Void
+
+    var body: some View {
+        ForEach(nodes) { node in
+            Menu {
+                Button {
+                    onSelect(node.folder.id)
+                } label: {
+                    Label("放入“\(node.folder.name)”", systemImage: "folder")
+                }
+                FolderDestinationMenuRows(nodes: node.children, onSelect: onSelect)
+            } label: {
+                Label(node.folder.name, systemImage: "folder")
+            }
+        }
     }
 }
 
@@ -767,7 +929,12 @@ private struct DocumentRow: View {
 private struct FolderLibraryView: View {
     let title: String
     let documents: [LibraryDocument]
+    let folders: [LibraryFolder]
     let onSelect: (LibraryDocument) -> Void
+    let onArchive: (LibraryDocument, UUID?) -> Void
+    let onDelete: (LibraryDocument) -> Void
+    let onRestore: (LibraryDocument, UUID?) -> Void
+    let onPermanentlyDelete: (LibraryDocument) -> Void
 
     private let columns = [GridItem(.adaptive(minimum: 150), spacing: 18)]
 
@@ -777,7 +944,11 @@ private struct FolderLibraryView: View {
                 ContentUnavailableView(
                     "\(title)为空",
                     systemImage: "folder",
-                    description: Text("导入文件时可将资料放入此文件夹。")
+                    description: Text(
+                        title == "废纸篓"
+                            ? "删除的文件会保留 7 天，之后自动清理。"
+                            : "导入文件时可将资料放入此文件夹。"
+                    )
                 )
             } else {
                 ScrollView {
@@ -800,6 +971,16 @@ private struct FolderLibraryView: View {
                                 .overlay { RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(.white.opacity(0.12), lineWidth: 1) }
                             }
                             .buttonStyle(.plain)
+                            .contextMenu {
+                                DocumentContextActions(
+                                    document: document,
+                                    folders: folders,
+                                    onArchive: onArchive,
+                                    onDelete: onDelete,
+                                    onRestore: onRestore,
+                                    onPermanentlyDelete: onPermanentlyDelete
+                                )
+                            }
                         }
                     }
                     .padding(24)

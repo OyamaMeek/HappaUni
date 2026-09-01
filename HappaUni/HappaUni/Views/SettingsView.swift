@@ -11,6 +11,7 @@ struct SettingsView: View {
     @AppStorage("ai.model") private var aiModel = "gpt-4o-mini"
     @AppStorage("githubConnected") private var githubConnected = false
     @AppStorage("github.repository") private var repository = "HappaUni-sync"
+    @AppStorage(WebDAVBackupSettings.enabledKey) private var webDAVBackupEnabled = true
     @State private var apiKey = ""
     @State private var githubToken = ""
     @State private var isConnectingGitHub = false
@@ -85,6 +86,12 @@ struct SettingsView: View {
                 }
 
                 Section("存储与缓存") {
+                    Toggle("启用 WebDAV 自动备份", isOn: $webDAVBackupEnabled)
+                    Text(webDAVBackupEnabled
+                         ? "编辑后的资料会同步到已配置的 WebDAV 服务器。"
+                         : "已关闭自动备份；WebDAV 浏览和手动操作仍可使用。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                     LabeledContent("WebDAV 缓存", value: cacheSize)
                     Button("清除 WebDAV 缓存", role: .destructive, action: clearWebDAVCache)
                 }
