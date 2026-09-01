@@ -178,12 +178,6 @@ private struct PDFKitDocumentView: UIViewRepresentable {
                     return
                 }
 
-                view.document = document
-                view.autoScales = true
-                let restoredPage = min(max(initialPage, 1), document.pageCount)
-                if let page = document.page(at: restoredPage - 1) {
-                    view.go(to: page)
-                }
                 let provider = PDFInkOverlayProvider(
                     document: document,
                     documentURL: url,
@@ -191,6 +185,12 @@ private struct PDFKitDocumentView: UIViewRepresentable {
                 )
                 self.overlayProvider = provider
                 view.pageOverlayViewProvider = provider
+                view.document = document
+                view.autoScales = true
+                let restoredPage = min(max(initialPage, 1), document.pageCount)
+                if let page = document.page(at: restoredPage - 1) {
+                    view.go(to: page)
+                }
                 self.publish(from: view)
             }
         }
@@ -289,7 +289,7 @@ private final class PDFInkOverlayProvider: NSObject, PDFPageOverlayViewProvider,
     private func presentNativeToolPicker(for canvas: PKCanvasView, retryIfNeeded: Bool = true) {
         guard let window = canvas.window else {
             guard retryIfNeeded else { return }
-            DispatchQueue.main.async { [weak self, weak canvas] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self, weak canvas] in
                 guard let self, let canvas, self.isMarkupEnabled else { return }
                 self.presentNativeToolPicker(for: canvas, retryIfNeeded: false)
             }
@@ -299,6 +299,7 @@ private final class PDFInkOverlayProvider: NSObject, PDFPageOverlayViewProvider,
         let picker = PKToolPicker.shared(for: window) ?? toolPicker ?? PKToolPicker()
         toolPicker = picker
         picker.addObserver(canvas)
+        canvas.isUserInteractionEnabled = true
         canvas.becomeFirstResponder()
         picker.setVisible(true, forFirstResponder: canvas)
     }
