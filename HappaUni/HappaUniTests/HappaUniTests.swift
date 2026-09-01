@@ -178,6 +178,24 @@ struct HappaUniTests {
         #expect(value == "…efghij")
     }
 
+    @Test("Document outline extracts Markdown headings with matching anchors")
+    func extractsMarkdownOutline() {
+        let items = DocumentOutlineExtractor.markdownItems(source: "# 课程\n正文\n## 第一讲\n### 重点")
+
+        #expect(items.map(\.title) == ["课程", "第一讲", "重点"])
+        #expect(items.map(\.level) == [0, 1, 2])
+        #expect(items.map(\.id) == ["heading-0", "heading-2", "heading-3"])
+    }
+
+    @Test("Knowledge map parser preserves nested AI outline")
+    func parsesKnowledgeMap() {
+        let map = KnowledgeMapParser.parse("计算机网络\n  - 分层模型\n    - 应用层\n  - 传输层", fallbackTitle: "PDF")
+
+        #expect(map.title == "计算机网络")
+        #expect(map.children.map(\.title) == ["分层模型", "传输层"])
+        #expect(map.children.first?.children.map(\.title) == ["应用层"])
+    }
+
     @Test("AI conversation messages retain their request role when restored")
     func restoresAIConversationMessageRole() {
         let message = AIConversationMessage(

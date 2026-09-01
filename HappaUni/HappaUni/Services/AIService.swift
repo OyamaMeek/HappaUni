@@ -1,4 +1,5 @@
 import Foundation
+import PDFKit
 
 struct AIMessage: Codable, Identifiable, Equatable {
     enum Role: String, Codable { case system, user, assistant }
@@ -26,9 +27,19 @@ enum AIContextExtractor {
     }
 
     static func text(for document: LibraryDocument) -> String {
-        guard document.type == .markdown || document.type == .text,
-              let content = try? String(contentsOf: document.url, encoding: .utf8) else { return "" }
-        return truncate(content)
+        switch document.type {
+        case .markdown, .text, .tex:
+            guard let content = try? String(contentsOf: document.url, encoding: .utf8) else { return "" }
+            return truncate(content)
+        case .pdf:
+            guard let pdf = PDFDocument(url: document.url) else { return "" }
+            let content = (0..<pdf.pageCount)
+                .compactMap { pdf.page(at: $0)?.string }
+                .joined(separator: "\n\n")
+            return truncate(content)
+        default:
+            return ""
+        }
     }
 }
 

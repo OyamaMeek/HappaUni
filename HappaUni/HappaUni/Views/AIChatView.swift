@@ -4,7 +4,6 @@ import SwiftData
 struct AIChatView: View {
     let document: LibraryDocument
 
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \AIConversation.updatedAt, order: .reverse) private var conversations: [AIConversation]
     @Query(sort: \AIConversationMessage.createdAt) private var storedMessages: [AIConversationMessage]
@@ -17,8 +16,7 @@ struct AIChatView: View {
     @State private var errorMessage: String?
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
+        VStack(spacing: 0) {
                 if messages.isEmpty {
                     ContentUnavailableView {
                         Label("询问文档", systemImage: "sparkles")
@@ -56,24 +54,16 @@ struct AIChatView: View {
                     .disabled(isSending || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
                 .padding()
-            }
-            .navigationTitle("AI 问答")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("完成") { dismiss() }
-                }
-            }
-            .task(id: document.id) {
+        }
+        .task(id: document.id) {
                 loadConversation()
             }
             .alert("AI 问答", isPresented: Binding(
                 get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } }
             )) {
                 Button("确定", role: .cancel) { errorMessage = nil }
-            } message: {
-                Text(errorMessage ?? "")
-            }
+        } message: {
+            Text(errorMessage ?? "")
         }
     }
 

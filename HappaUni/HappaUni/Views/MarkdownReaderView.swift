@@ -3,6 +3,7 @@ import WebKit
 
 struct MarkdownReaderView: View {
     let url: URL
+    @Binding var requestedAnchor: String?
 
     @State private var content = ""
     @State private var errorMessage: String?
@@ -12,7 +13,7 @@ struct MarkdownReaderView: View {
             if let errorMessage {
                 ContentUnavailableView("无法读取 Markdown", systemImage: "exclamationmark.triangle", description: Text(errorMessage))
             } else {
-                MarkdownWebView(html: MarkdownHTML.document(for: content))
+                MarkdownWebView(html: MarkdownHTML.document(for: content), requestedAnchor: $requestedAnchor)
                     .background(Color.black)
             }
         }
@@ -29,6 +30,7 @@ struct MarkdownReaderView: View {
 
 private struct MarkdownWebView: UIViewRepresentable {
     let html: String
+    @Binding var requestedAnchor: String?
 
     func makeUIView(context: Context) -> WKWebView {
         let view = WKWebView(frame: .zero)
@@ -39,9 +41,15 @@ private struct MarkdownWebView: UIViewRepresentable {
     }
 
     func updateUIView(_ view: WKWebView, context: Context) {
-        guard context.coordinator.html != html else { return }
-        context.coordinator.html = html
-        view.loadHTMLString(html, baseURL: nil)
+        if context.coordinator.html != html {
+            context.coordinator.html = html
+            view.loadHTMLString(html, baseURL: nil)
+        }
+        if let requestedAnchor {
+            let escapedID = requestedAnchor.replacingOccurrences(of: "'", with: "\\'")
+            view.evaluateJavaScript("document.getElementById('\(escapedID)')?.scrollIntoView({behavior: 'smooth', block: 'start'});")
+            DispatchQueue.main.async { self.requestedAnchor = nil }
+        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -55,11 +63,12 @@ private enum MarkdownHTML {
     static func document(for source: String) -> String {
         let body = source
             .split(separator: "\n", omittingEmptySubsequences: false)
-            .map { line in
+            .enumerated()
+            .map { index, line in
                 let escaped = escape(String(line))
-                if escaped.hasPrefix("### ") { return "<h3>\(String(escaped.dropFirst(4)))</h3>" }
-                if escaped.hasPrefix("## ") { return "<h2>\(String(escaped.dropFirst(3)))</h2>" }
-                if escaped.hasPrefix("# ") { return "<h1>\(String(escaped.dropFirst(2)))</h1>" }
+                if escaped.hasPrefix("### ") { return "<h3 id=\"heading-\(index)\">\(String(escaped.dropFirst(4)))</h3>" }
+                if escaped.hasPrefix("## ") { return "<h2 id=\"heading-\(index)\">\(String(escaped.dropFirst(3)))</h2>" }
+                if escaped.hasPrefix("# ") { return "<h1 id=\"heading-\(index)\">\(String(escaped.dropFirst(2)))</h1>" }
                 if escaped.hasPrefix("- ") || escaped.hasPrefix("* ") { return "<p>• \(String(escaped.dropFirst(2)))</p>" }
                 if escaped.isEmpty { return "<div class=\"gap\"></div>" }
                 return "<p>\(escaped)</p>"

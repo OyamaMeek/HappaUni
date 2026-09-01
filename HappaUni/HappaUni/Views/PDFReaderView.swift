@@ -10,11 +10,9 @@ struct PDFReaderView: View {
 
     @State private var state = PDFDocumentState.empty
     @State private var searchText = ""
-    @State private var requestedPage: Int?
+    @Binding var requestedPage: Int?
     @State private var requestedZoom: CGFloat?
     @State private var isMarkupEnabled = false
-    @State private var markupSettings = PDFMarkupSettings()
-    @State private var markupCommand: PDFMarkupCommand?
 
     var body: some View {
         PDFKitDocumentView(
@@ -23,21 +21,9 @@ struct PDFReaderView: View {
             requestedZoom: $requestedZoom,
             searchText: searchText,
             isMarkupEnabled: isMarkupEnabled,
-            markupSettings: markupSettings,
-            markupCommand: $markupCommand,
             state: $state
         )
         .background(Color.black)
-        .safeAreaInset(edge: .top) {
-            if isMarkupEnabled {
-                PDFMarkupToolbar(
-                    settings: $markupSettings,
-                    command: $markupCommand
-                )
-                .padding(.horizontal)
-                .padding(.top, 8)
-            }
-        }
         .safeAreaInset(edge: .bottom) {
             HStack(spacing: 14) {
                 Button {
@@ -98,145 +84,12 @@ struct PDFReaderView: View {
     }
 }
 
-private enum PDFMarkupTool: String, CaseIterable, Identifiable {
-    case pen
-    case highlighter
-    case eraser
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .pen: "钢笔"
-        case .highlighter: "荧光笔"
-        case .eraser: "橡皮擦"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .pen: "pencil.tip"
-        case .highlighter: "highlighter"
-        case .eraser: "eraser"
-        }
-    }
-}
-
-private enum PDFMarkupColor: String, CaseIterable, Identifiable {
-    case graphite
-    case blue
-    case red
-    case yellow
-
-    var id: String { rawValue }
-
-    var uiColor: UIColor {
-        switch self {
-        case .graphite: .label
-        case .blue: .systemBlue
-        case .red: .systemRed
-        case .yellow: .systemYellow
-        }
-    }
-}
-
-private struct PDFMarkupSettings: Equatable {
-    var tool: PDFMarkupTool = .pen
-    var color: PDFMarkupColor = .blue
-    var width: CGFloat = 4
-}
-
-private enum PDFMarkupCommand: Equatable {
-    case undo(UUID)
-    case redo(UUID)
-    case clearPage(UUID)
-}
-
-private struct PDFMarkupToolbar: View {
-    @Binding var settings: PDFMarkupSettings
-    @Binding var command: PDFMarkupCommand?
-
-    var body: some View {
-        HStack(spacing: 10) {
-            ForEach(PDFMarkupTool.allCases) { tool in
-                Button {
-                    settings.tool = tool
-                } label: {
-                    Image(systemName: tool.systemImage)
-                        .frame(width: 30, height: 30)
-                        .background(
-                            settings.tool == tool ? Color.accentColor.opacity(0.22) : .clear,
-                            in: Circle()
-                        )
-                }
-                .accessibilityLabel(tool.title)
-            }
-
-            if settings.tool != .eraser {
-                Divider().frame(height: 24)
-                ForEach(PDFMarkupColor.allCases) { color in
-                    Button {
-                        settings.color = color
-                    } label: {
-                        Circle()
-                            .fill(Color(uiColor: color.uiColor))
-                            .overlay {
-                                Circle()
-                                    .stroke(.white, lineWidth: settings.color == color ? 2 : 0)
-                                    .padding(2)
-                            }
-                            .frame(width: 22, height: 22)
-                    }
-                    .accessibilityLabel(color.rawValue)
-                }
-
-                Slider(value: $settings.width, in: 1...12, step: 1)
-                    .frame(width: 84)
-                    .accessibilityLabel("笔触粗细")
-            }
-
-            Divider().frame(height: 24)
-
-            Button {
-                command = .undo(UUID())
-            } label: {
-                Image(systemName: "arrow.uturn.backward")
-            }
-            .accessibilityLabel("撤销")
-
-            Button {
-                command = .redo(UUID())
-            } label: {
-                Image(systemName: "arrow.uturn.forward")
-            }
-            .accessibilityLabel("重做")
-
-            Button(role: .destructive) {
-                command = .clearPage(UUID())
-            } label: {
-                Image(systemName: "trash")
-            }
-            .accessibilityLabel("清空本页笔记")
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .foregroundStyle(.primary)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay {
-            Capsule().stroke(.white.opacity(0.14), lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.2), radius: 12, y: 5)
-    }
-}
-
 private struct PDFKitDocumentView: UIViewRepresentable {
     let url: URL
     @Binding var requestedPage: Int?
     @Binding var requestedZoom: CGFloat?
     let searchText: String
     let isMarkupEnabled: Bool
-    let markupSettings: PDFMarkupSettings
-    @Binding var markupCommand: PDFMarkupCommand?
     @Binding var state: PDFDocumentState
 
     func makeCoordinator() -> Coordinator {
@@ -267,22 +120,13 @@ private struct PDFKitDocumentView: UIViewRepresentable {
             DispatchQueue.main.async { self.requestedZoom = nil }
         }
         context.coordinator.updateSearch(searchText, in: view)
-        context.coordinator.updateMarkup(
-            isEnabled: isMarkupEnabled,
-            settings: markupSettings,
-            command: markupCommand,
-            in: view
-        )
-        if markupCommand != nil {
-            DispatchQueue.main.async { markupCommand = nil }
-        }
+        context.coordinator.updateMarkup(isEnabled: isMarkupEnabled, in: view)
     }
 
     final class Coordinator: NSObject {
         @Binding private var state: PDFDocumentState
         private var observers: [NSObjectProtocol] = []
         private var lastSearchText = ""
-        private var lastMarkupCommand: PDFMarkupCommand?
         private var overlayProvider: PDFInkOverlayProvider?
         var loadedURL: URL?
 
@@ -358,24 +202,8 @@ private struct PDFKitDocumentView: UIViewRepresentable {
             )
         }
 
-        func updateMarkup(
-            isEnabled: Bool,
-            settings: PDFMarkupSettings,
-            command: PDFMarkupCommand?,
-            in view: PDFView
-        ) {
-            overlayProvider?.configure(isEnabled: isEnabled, settings: settings)
-            guard let command, command != lastMarkupCommand else { return }
-            lastMarkupCommand = command
-
-            switch command {
-            case .undo:
-                overlayProvider?.undo(on: view.currentPage)
-            case .redo:
-                overlayProvider?.redo(on: view.currentPage)
-            case .clearPage:
-                overlayProvider?.clear(on: view.currentPage)
-            }
+        func updateMarkup(isEnabled: Bool, in view: PDFView) {
+            overlayProvider?.configure(isEnabled: isEnabled, in: view)
         }
 
         private func publish(from view: PDFView?) {
@@ -396,12 +224,14 @@ private final class PDFInkOverlayProvider: NSObject, PDFPageOverlayViewProvider,
     private var canvases: [Int: PKCanvasView] = [:]
     private var saveWorkItem: DispatchWorkItem?
     private var isMarkupEnabled = false
-    private var settings = PDFMarkupSettings()
+    private weak var pdfView: PDFView?
+    private let toolPicker = PKToolPicker()
 
     init(document: PDFDocument, documentURL: URL, drawingData: [Int: Data]) {
         self.document = document
         self.documentURL = documentURL
         self.drawingData = drawingData
+        super.init()
     }
 
     func pdfView(_ view: PDFView, overlayViewFor page: PDFPage) -> UIView? {
@@ -415,48 +245,43 @@ private final class PDFInkOverlayProvider: NSObject, PDFPageOverlayViewProvider,
         canvas.delegate = self
         canvas.drawing = drawing(for: pageIndex)
         canvases[pageIndex] = canvas
-        applyConfiguration(to: canvas)
+        configureCanvas(canvas)
+        if isMarkupEnabled, view.currentPage === page {
+            showNativeToolPicker(for: canvas)
+        }
         return canvas
     }
 
-    func configure(isEnabled: Bool, settings: PDFMarkupSettings) {
+    func configure(isEnabled: Bool, in view: PDFView) {
         isMarkupEnabled = isEnabled
-        self.settings = settings
-        canvases.values.forEach(applyConfiguration)
-    }
-
-    func undo(on page: PDFPage?) {
-        canvas(for: page)?.undoManager?.undo()
-    }
-
-    func redo(on page: PDFPage?) {
-        canvas(for: page)?.undoManager?.redo()
-    }
-
-    func clear(on page: PDFPage?) {
-        guard let canvas = canvas(for: page) else { return }
-        canvas.drawing = PKDrawing()
-        persistDrawing(for: canvas)
+        pdfView = view
+        canvases.values.forEach(configureCanvas)
+        guard let canvas = canvas(for: view.currentPage) else { return }
+        if isEnabled {
+            showNativeToolPicker(for: canvas)
+        } else {
+            toolPicker.setVisible(false, forFirstResponder: canvas)
+            canvas.resignFirstResponder()
+        }
     }
 
     func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
         persistDrawing(for: canvasView)
     }
 
-    private func applyConfiguration(to canvas: PKCanvasView) {
+    private func configureCanvas(_ canvas: PKCanvasView) {
         canvas.isUserInteractionEnabled = isMarkupEnabled
-        switch settings.tool {
-        case .pen:
-            canvas.tool = PKInkingTool(.pen, color: settings.color.uiColor, width: settings.width)
-        case .highlighter:
-            canvas.tool = PKInkingTool(
-                .marker,
-                color: settings.color.uiColor.withAlphaComponent(0.35),
-                width: settings.width * 2.4
-            )
-        case .eraser:
-            canvas.tool = PKEraserTool(.vector)
+        if isMarkupEnabled {
+            toolPicker.addObserver(canvas)
+        } else {
+            toolPicker.removeObserver(canvas)
         }
+    }
+
+    private func showNativeToolPicker(for canvas: PKCanvasView) {
+        toolPicker.addObserver(canvas)
+        toolPicker.setVisible(true, forFirstResponder: canvas)
+        canvas.becomeFirstResponder()
     }
 
     private func canvas(for page: PDFPage?) -> PKCanvasView? {

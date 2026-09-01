@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-public enum DocumentType: String, Codable, CaseIterable, Identifiable {
+public enum DocumentType: String, Codable, CaseIterable, Identifiable, Sendable {
     case pdf
     case markdown
     case tex
