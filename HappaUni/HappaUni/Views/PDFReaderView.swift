@@ -9,6 +9,7 @@ struct PDFReaderView: View {
     let url: URL
     let initialPage: Int
     let onPageChanged: (Int) -> Void
+    let onMarkupChanged: () -> Void
 
     @State private var state = PDFDocumentState.empty
     @State private var searchText = ""
@@ -25,9 +26,13 @@ struct PDFReaderView: View {
             searchText: searchText,
             isMarkupEnabled: isMarkupEnabled,
             onPageChanged: onPageChanged,
+            onMarkupChanged: onMarkupChanged,
             state: $state
         )
         .background(Color.black)
+        .onDisappear {
+            PDFAnnotationStore.flush(for: url)
+        }
         .safeAreaInset(edge: .bottom) {
             HStack(spacing: 14) {
                 Button {
@@ -96,10 +101,15 @@ private struct PDFKitDocumentView: UIViewRepresentable {
     let searchText: String
     let isMarkupEnabled: Bool
     let onPageChanged: (Int) -> Void
+    let onMarkupChanged: () -> Void
     @Binding var state: PDFDocumentState
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(state: $state, onPageChanged: onPageChanged)
+        Coordinator(
+            state: $state,
+            onPageChanged: onPageChanged,
+            onMarkupChanged: onMarkupChanged
+        )
     }
 
     func makeUIView(context: Context) -> PDFView {
@@ -129,17 +139,27 @@ private struct PDFKitDocumentView: UIViewRepresentable {
         context.coordinator.updateMarkup(isEnabled: isMarkupEnabled, in: view)
     }
 
+    static func dismantleUIView(_ view: PDFView, coordinator: Coordinator) {
+        coordinator.flushAnnotations()
+    }
+
     final class Coordinator: NSObject {
         @Binding private var state: PDFDocumentState
         private let onPageChanged: (Int) -> Void
+        private let onMarkupChanged: () -> Void
         private var observers: [NSObjectProtocol] = []
         private var lastSearchText = ""
         private var overlayProvider: PDFInkOverlayProvider?
         var loadedURL: URL?
 
-        init(state: Binding<PDFDocumentState>, onPageChanged: @escaping (Int) -> Void) {
+        init(
+            state: Binding<PDFDocumentState>,
+            onPageChanged: @escaping (Int) -> Void,
+            onMarkupChanged: @escaping () -> Void
+        ) {
             _state = state
             self.onPageChanged = onPageChanged
+            self.onMarkupChanged = onMarkupChanged
         }
 
         deinit {
@@ -181,7 +201,8 @@ private struct PDFKitDocumentView: UIViewRepresentable {
                 let provider = PDFInkOverlayProvider(
                     document: document,
                     documentURL: url,
-                    drawingData: PDFAnnotationStore.load(for: url)
+                    drawingData: PDFAnnotationStore.load(for: url),
+                    onDrawingChanged: onMarkupChanged
                 )
                 self.overlayProvider = provider
                 view.pageOverlayViewProvider = provider
@@ -215,6 +236,10 @@ private struct PDFKitDocumentView: UIViewRepresentable {
             overlayProvider?.configure(isEnabled: isEnabled, in: view)
         }
 
+        func flushAnnotations() {
+            overlayProvider?.flush()
+        }
+
         private func publish(from view: PDFView?) {
             guard let view else { return }
             state = PDFService.state(
@@ -237,12 +262,40 @@ private final class PDFInkOverlayProvider: NSObject, PDFPageOverlayViewProvider,
     private var saveWorkItem: DispatchWorkItem?
     private var isMarkupEnabled = false
     private var toolPicker: PKToolPicker?
+    private let onDrawingChanged: () -> Void
+    private var flushObserver: NSObjectProtocol?
 
-    init(document: PDFDocument, documentURL: URL, drawingData: [Int: Data]) {
+    init(
+        document: PDFDocument,
+        documentURL: URL,
+        drawingData: [Int: Data],
+        onDrawingChanged: @escaping () -> Void
+    ) {
         self.document = document
         self.documentURL = documentURL
         self.drawingData = drawingData
+        self.onDrawingChanged = onDrawingChanged
         super.init()
+        flushObserver = NotificationCenter.default.addObserver(
+            forName: PDFAnnotationStore.flushNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard
+                let self,
+                let url = notification.userInfo?[PDFAnnotationStore.documentURLKey] as? URL,
+                url.standardizedFileURL == self.documentURL.standardizedFileURL
+            else {
+                return
+            }
+            self.flush()
+        }
+    }
+
+    deinit {
+        if let flushObserver {
+            NotificationCenter.default.removeObserver(flushObserver)
+        }
     }
 
     func pdfView(_ view: PDFView, overlayViewFor page: PDFPage) -> UIView? {
@@ -282,6 +335,7 @@ private final class PDFInkOverlayProvider: NSObject, PDFPageOverlayViewProvider,
     }
 
     func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
+        onDrawingChanged()
         persistDrawing(for: canvasView)
     }
 
@@ -360,6 +414,12 @@ private final class PDFInkOverlayProvider: NSObject, PDFPageOverlayViewProvider,
         }
         saveWorkItem = workItem
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.45, execute: workItem)
+    }
+
+    func flush() {
+        saveWorkItem?.cancel()
+        saveWorkItem = nil
+        try? PDFAnnotationStore.save(drawingData, for: documentURL)
     }
 }
 
@@ -537,6 +597,9 @@ struct PDFAnnotationArchive: Codable {
 }
 
 enum PDFAnnotationStore {
+    static let flushNotification = Notification.Name("HappaUni.flushPDFAnnotations")
+    static let documentURLKey = "documentURL"
+
     static func load(for documentURL: URL, in directory: URL? = nil) -> [Int: Data] {
         let fileURL = archiveURL(for: documentURL, in: directory)
         guard
@@ -564,6 +627,18 @@ enum PDFAnnotationStore {
             .appendingPathComponent(identifier(for: documentURL))
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
         try FileManager.default.removeItem(at: fileURL)
+    }
+
+    static func archiveData(for documentURL: URL, in directory: URL? = nil) -> Data? {
+        try? Data(contentsOf: archiveURL(for: documentURL, in: directory))
+    }
+
+    static func flush(for documentURL: URL) {
+        NotificationCenter.default.post(
+            name: flushNotification,
+            object: nil,
+            userInfo: [documentURLKey: documentURL]
+        )
     }
 
     static func identifier(for documentURL: URL) -> String {

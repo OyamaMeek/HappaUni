@@ -1,9 +1,11 @@
 import SwiftData
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \LibraryDocument.modifiedAt, order: .reverse) private var documents: [LibraryDocument]
     @Query(sort: \WebDAVAccount.createdAt, order: .reverse) private var webDAVAccounts: [WebDAVAccount]
     @Query(sort: \LibraryFolder.name) private var folders: [LibraryFolder]
@@ -23,6 +25,7 @@ struct ContentView: View {
     @State private var isShowingAddFolder = false
     @State private var newFolderParentID: UUID?
     @State private var outlineDestination: DocumentOutlineItem.Destination?
+    @State private var synchronizingDocumentIDs = Set<UUID>()
 
     private var folderNodes: [FolderTreeNode] { FolderTreeBuilder.make(from: folders) }
     private var filteredDocuments: [LibraryDocument] {
@@ -100,6 +103,20 @@ struct ContentView: View {
                 errorMessage = error.localizedDescription
             }
         }
+        .onChange(of: selectedDocumentID) { previousID, currentID in
+            guard
+                previousID != currentID,
+                let previousID,
+                let document = documents.first(where: { $0.persistentModelID == previousID })
+            else {
+                return
+            }
+            synchronizeEditedDocument(document)
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase != .active, let selectedDocument else { return }
+            synchronizeEditedDocument(selectedDocument)
+        }
         .sheet(isPresented: $isShowingAddWebDAV) {
             AddWebDAVAccountView()
         }
@@ -126,6 +143,26 @@ struct ContentView: View {
     }
 
     private static let texContentType = UTType(filenameExtension: "tex") ?? .plainText
+
+    private func synchronizeEditedDocument(_ document: LibraryDocument) {
+        guard synchronizingDocumentIDs.insert(document.id).inserted else { return }
+        PDFAnnotationStore.flush(for: document.url)
+
+        let backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "同步 \(document.name)") {}
+        let webDAVAccounts = webDAVAccounts
+        let repository = githubRepository
+
+        Task {
+            await SyncService.shared.syncEditedDocument(
+                document,
+                webDAVAccounts: webDAVAccounts,
+                repository: repository
+            )
+            try? modelContext.save()
+            synchronizingDocumentIDs.remove(document.id)
+            UIApplication.shared.endBackgroundTask(backgroundTaskID)
+        }
+    }
 
     private var sidebar: some View {
         List(selection: $selectedDocumentID) {

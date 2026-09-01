@@ -73,6 +73,7 @@ struct DocumentReaderView: View {
                 url: document.url,
                 initialPage: document.lastReadPage,
                 onPageChanged: saveReadingPage,
+                onMarkupChanged: markDocumentModified,
                 requestedPage: $requestedPDFPage,
             )
         case .markdown:
@@ -126,6 +127,11 @@ struct DocumentReaderView: View {
     private func saveReadingPage(_ page: Int) {
         guard document.lastReadPage != page else { return }
         document.lastReadPage = page
+        try? modelContext.save()
+    }
+
+    private func markDocumentModified() {
+        document.modifiedAt = .now
         try? modelContext.save()
     }
 }

@@ -97,13 +97,111 @@ final class SyncService {
 
     func syncFileOnOpen(_ document: LibraryDocument, repository: String = GitHubConfiguration.default.repositoryName) async throws {
         guard GitHubService.shared.isAuthenticated else { return }
-        guard !document.isSyncedToGitHub || document.modifiedAt > (document.gitLastSyncAt ?? .distantPast) else { return }
+        let fileModifiedAt = (
+            try? FileManager.default.attributesOfItem(atPath: document.url.path)[.modificationDate] as? Date
+        ) ?? .distantPast
+        let localModifiedAt = max(document.modifiedAt, fileModifiedAt)
+        guard !document.isSyncedToGitHub || localModifiedAt > (document.gitLastSyncAt ?? .distantPast) else { return }
+
         let data = try Data(contentsOf: document.url)
         let path = "documents/\(document.id.uuidString)/\(document.name)"
         let sha = try await GitHubService.shared.commit(data: data, repository: repository, path: path, message: "Sync \(document.name)")
+        if let annotationData = PDFAnnotationStore.archiveData(for: document.url) {
+            _ = try await GitHubService.shared.commit(
+                data: annotationData,
+                repository: repository,
+                path: "annotations/\(document.id.uuidString).json",
+                message: "Sync annotations for \(document.name)"
+            )
+        }
         document.isSyncedToGitHub = true
         document.gitCommitHash = sha
         document.gitLastSyncAt = .now
+    }
+
+    func syncEditedDocument(
+        _ document: LibraryDocument,
+        webDAVAccounts: [WebDAVAccount],
+        repository: String = GitHubConfiguration.default.repositoryName
+    ) async {
+        try? await syncFileOnOpen(document, repository: repository)
+
+        for account in webDAVAccounts {
+            try? await upload(document, to: account)
+        }
+    }
+
+    private func upload(_ document: LibraryDocument, to account: WebDAVAccount) async throws {
+        guard
+            let serverURL = account.serverURL,
+            let password = try KeychainStore().value(for: account.passwordKey)
+        else {
+            return
+        }
+
+        let documentDirectory = WebDAVRemotePath.join(
+            base: WebDAVRemotePath.libraryRoot,
+            child: "documents/\(document.id.uuidString)"
+        )
+        try await ensureDirectoryTree(
+            at: documentDirectory,
+            serverURL: serverURL,
+            username: account.username,
+            password: password
+        )
+
+        let documentRemotePath = WebDAVRemotePath.join(base: documentDirectory, child: document.name)
+        do {
+            try await WebDAVService.shared.upload(
+                data: Data(contentsOf: document.url),
+                to: WebDAVRemotePath.url(serverURL: serverURL, path: documentRemotePath),
+                username: account.username,
+                password: password
+            )
+        } catch {
+            WebDAVUploadQueue.shared.enqueue(
+                accountID: account.id,
+                localURL: document.url,
+                remotePath: documentRemotePath
+            )
+            throw error
+        }
+
+        guard let annotationData = PDFAnnotationStore.archiveData(for: document.url) else { return }
+        let annotationsDirectory = WebDAVRemotePath.join(base: WebDAVRemotePath.libraryRoot, child: "annotations")
+        try await ensureDirectoryTree(
+            at: annotationsDirectory,
+            serverURL: serverURL,
+            username: account.username,
+            password: password
+        )
+        try await WebDAVService.shared.upload(
+            data: annotationData,
+            to: WebDAVRemotePath.url(
+                serverURL: serverURL,
+                path: WebDAVRemotePath.join(base: annotationsDirectory, child: "\(document.id.uuidString).json")
+            ),
+            username: account.username,
+            password: password
+        )
+    }
+
+    private func ensureDirectoryTree(
+        at path: String,
+        serverURL: URL,
+        username: String,
+        password: String
+    ) async throws {
+        var currentPath = ""
+        for component in path.split(separator: "/") {
+            currentPath = WebDAVRemotePath.join(base: currentPath, child: String(component))
+            try await WebDAVService.shared.ensureDirectory(
+                serverURL: serverURL,
+                username: username,
+                password: password,
+                path: currentPath
+            )
+        }
     }
 
     func restoreDocuments(
