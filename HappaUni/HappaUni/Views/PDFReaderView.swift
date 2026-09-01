@@ -359,6 +359,13 @@ enum PDFAnnotationStore {
         try data.write(to: fileURL, options: .atomic)
     }
 
+    static func delete(for documentURL: URL, in directory: URL? = nil) throws {
+        let fileURL = try resolvedDirectory(directory)
+            .appendingPathComponent(identifier(for: documentURL))
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+        try FileManager.default.removeItem(at: fileURL)
+    }
+
     static func identifier(for documentURL: URL) -> String {
         let path = documentURL.standardizedFileURL.path
         let digest = SHA256.hash(data: Data(path.utf8))

@@ -134,9 +134,28 @@ struct HappaUniTests {
             from: sourceURL,
             preferredFilename: "GitHub 入门与实践.pdf"
         )
-        defer { try? service.delete(document) }
 
         #expect(document.name == "GitHub 入门与实践.pdf")
+        #expect(FileManager.default.fileExists(atPath: document.url.path))
+        try service.delete(document)
+        #expect(!FileManager.default.fileExists(atPath: document.url.path))
+    }
+
+    @Test("Deleting a document removes a matching file left by an old container path")
+    func deletesMigratedDocumentFile() throws {
+        let service = FileService()
+        let documentsDirectory = try service.documentsDirectory()
+        let filename = "\(UUID().uuidString).pdf"
+        let currentURL = documentsDirectory.appendingPathComponent(filename)
+        try Data("PDF".utf8).write(to: currentURL)
+        defer { try? FileManager.default.removeItem(at: currentURL) }
+
+        let staleURL = URL(fileURLWithPath: "/private/var/old-container/Documents/\(filename)")
+        let document = LibraryDocument(name: filename, url: staleURL, type: .pdf, size: 3)
+
+        try service.delete(document)
+
+        #expect(!FileManager.default.fileExists(atPath: currentURL.path))
     }
 
     @Test("WebDAV response parser excludes the requested directory")

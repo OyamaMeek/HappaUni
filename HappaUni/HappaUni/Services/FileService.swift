@@ -116,8 +116,26 @@ struct FileService {
     }
 
     func delete(_ document: LibraryDocument) throws {
-        guard FileManager.default.fileExists(atPath: document.url.path) else { return }
-        try FileManager.default.removeItem(at: document.url)
+        let fileManager = FileManager.default
+        let documentsDirectory = try documentsDirectory()
+        let fileName = URL(fileURLWithPath: document.path).lastPathComponent
+        let legacyDirectory = documentsDirectory.appendingPathComponent("Library", isDirectory: true)
+        let sharedLibraryDirectory = documentsDirectory.appendingPathComponent("资料库", isDirectory: true)
+
+        let candidateURLs = uniqueURLs([
+            document.url,
+            URL(fileURLWithPath: document.path),
+            documentsDirectory.appendingPathComponent(fileName),
+            legacyDirectory.appendingPathComponent(fileName),
+            sharedLibraryDirectory.appendingPathComponent(fileName)
+        ])
+
+        for url in candidateURLs where isInsideDocumentsDirectory(url, documentsDirectory: documentsDirectory) {
+            if fileManager.fileExists(atPath: url.path) {
+                try fileManager.removeItem(at: url)
+            }
+            try? PDFAnnotationStore.delete(for: url)
+        }
     }
 
     func documentsDirectory() throws -> URL {
@@ -189,5 +207,16 @@ struct FileService {
             index += 1
         }
         return candidate
+    }
+
+    private func uniqueURLs(_ urls: [URL]) -> [URL] {
+        var seen = Set<String>()
+        return urls.filter { seen.insert($0.standardizedFileURL.path).inserted }
+    }
+
+    private func isInsideDocumentsDirectory(_ url: URL, documentsDirectory: URL) -> Bool {
+        let directoryPath = documentsDirectory.standardizedFileURL.path
+        let urlPath = url.standardizedFileURL.path
+        return urlPath.hasPrefix(directoryPath + "/")
     }
 }
