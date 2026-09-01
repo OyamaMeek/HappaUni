@@ -156,33 +156,30 @@ private struct PDFKitDocumentView: UIViewRepresentable {
             view.pageOverlayViewProvider = nil
             state = .empty
 
-            DispatchQueue.global(qos: .userInitiated).async { [weak self, weak view] in
-                let document: PDFDocument? = autoreleasepool {
-                    guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else {
-                        return nil
-                    }
-                    return PDFDocument(data: data)
+            // PDFKit must create PDFDocument on the main thread. Creating it in a
+            // background queue can return an empty document on newer iPadOS builds.
+            DispatchQueue.main.async { [weak self, weak view] in
+                guard let self, let view, self.loadedURL == url else { return }
+                guard FileManager.default.fileExists(atPath: url.path) else {
+                    self.state = .failed("PDF 文件不存在")
+                    return
                 }
-                let annotationData = PDFAnnotationStore.load(for: url)
 
-                DispatchQueue.main.async {
-                    guard let self, let view, self.loadedURL == url else { return }
-                    guard let document, document.pageCount > 0 else {
-                        self.state = .failed("无法加载 PDF")
-                        return
-                    }
-
-                    view.document = document
-                    view.autoScales = true
-                    let provider = PDFInkOverlayProvider(
-                        document: document,
-                        documentURL: url,
-                        drawingData: annotationData
-                    )
-                    self.overlayProvider = provider
-                    view.pageOverlayViewProvider = provider
-                    self.publish(from: view)
+                guard let document = PDFDocument(url: url), document.pageCount > 0 else {
+                    self.state = .failed("无法加载 PDF")
+                    return
                 }
+
+                view.document = document
+                view.autoScales = true
+                let provider = PDFInkOverlayProvider(
+                    document: document,
+                    documentURL: url,
+                    drawingData: PDFAnnotationStore.load(for: url)
+                )
+                self.overlayProvider = provider
+                view.pageOverlayViewProvider = provider
+                self.publish(from: view)
             }
         }
 

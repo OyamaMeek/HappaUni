@@ -68,6 +68,7 @@ struct ContentView: View {
             if let selectedDocument {
                 DocumentReaderView(
                     document: selectedDocument,
+                    onBack: { selectedDocumentID = nil },
                     outlineDestination: $outlineDestination
                 )
             } else {

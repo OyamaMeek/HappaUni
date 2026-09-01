@@ -16,6 +16,7 @@ struct DocumentReaderView: View {
     }
 
     let document: LibraryDocument
+    let onBack: () -> Void
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Binding var outlineDestination: DocumentOutlineItem.Destination?
     @State private var requestedPDFPage: Int?
@@ -44,6 +45,13 @@ struct DocumentReaderView: View {
             open(destination)
         }
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button(action: onBack) {
+                    Image(systemName: "chevron.left")
+                }
+                .accessibilityLabel("返回资料库")
+            }
+
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if supportsKnowledgeMap {
                     Button {
