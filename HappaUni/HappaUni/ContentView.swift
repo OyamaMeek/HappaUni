@@ -26,6 +26,7 @@ struct ContentView: View {
     @State private var newFolderParentID: UUID?
     @State private var outlineDestination: DocumentOutlineItem.Destination?
     @State private var synchronizingDocumentIDs = Set<UUID>()
+    @State private var pendingImport: PendingImport?
 
     private var folderNodes: [FolderTreeNode] { FolderTreeBuilder.make(from: folders) }
     private var filteredDocuments: [LibraryDocument] {
@@ -85,7 +86,15 @@ struct ContentView: View {
             allowedContentTypes: [.pdf, .plainText, .utf8PlainText, .image, .epub, Self.texContentType],
             allowsMultipleSelection: true
         ) { result in
-            importFiles(result)
+            prepareImport(result)
+        }
+        .sheet(item: $pendingImport) { pending in
+            ImportDestinationPickerView(
+                fileCount: pending.urls.count,
+                folders: folders,
+                onSelect: { folderID in commitImport(pending, folderID: folderID) },
+                onCancel: { discardPendingImport(pending) }
+            )
         }
         .sheet(isPresented: $isShowingSettings) {
             SettingsView()
@@ -97,7 +106,7 @@ struct ContentView: View {
             outlineDestination = nil
             guard let selectedDocument else { return }
             do {
-                try await SyncService.shared.syncFileOnOpen(selectedDocument, repository: githubRepository)
+                try await SyncService.shared.syncFileOnOpen(selectedDocument, folders: folders, repository: githubRepository)
                 try modelContext.save()
             } catch {
                 errorMessage = error.localizedDescription
@@ -142,6 +151,12 @@ struct ContentView: View {
         }
     }
 
+    private struct PendingImport: Identifiable {
+        let id = UUID()
+        let directory: URL
+        let urls: [URL]
+    }
+
     private static let texContentType = UTType(filenameExtension: "tex") ?? .plainText
 
     private func synchronizeEditedDocument(_ document: LibraryDocument) {
@@ -155,6 +170,8 @@ struct ContentView: View {
         Task {
             await SyncService.shared.syncEditedDocument(
                 document,
+                documents: documents,
+                folders: folders,
                 webDAVAccounts: webDAVAccounts,
                 repository: repository
             )
@@ -218,16 +235,23 @@ struct ContentView: View {
                 }
             }
 
-            Section("文件夹") {
+            Section {
                 Button {
                     selectedFolderID = nil
                 } label: {
-                    Label("全部资料", systemImage: selectedFolderID == nil ? "folder.fill" : "folder")
+                    FolderSidebarRow(
+                        name: "未归档",
+                        color: .gray,
+                        count: filteredDocuments.filter { $0.folderID == nil }.count,
+                        isSelected: selectedFolderID == nil
+                    )
                 }
+                .buttonStyle(.plain)
 
                 FolderTreeRows(
                     nodes: folderNodes,
                     documents: filteredDocuments,
+                    allFolders: folders,
                     selectedFolderID: $selectedFolderID,
                     selectedDocumentID: $selectedDocumentID,
                     editingDocument: $editingDocument,
@@ -239,9 +263,15 @@ struct ContentView: View {
                     onArchiveDocument: archive,
                     onDeleteDocument: delete
                 )
-
-                ForEach(filteredDocuments.filter { $0.folderID == nil }) { document in
-                    documentRow(document)
+            } header: {
+                HStack {
+                    Text("文件夹")
+                    Spacer()
+                    Button { newFolderParentID = nil; isShowingAddFolder = true } label: {
+                        Image(systemName: "plus")
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("新建文件夹")
                 }
             }
 
@@ -322,34 +352,67 @@ struct ContentView: View {
             || document.tags.contains { $0.localizedCaseInsensitiveContains(searchText) }
     }
 
-    private func importFiles(_ result: Result<[URL], Error>) {
+    private func prepareImport(_ result: Result<[URL], Error>) {
         do {
             let sourceURLs = try result.get()
             let securityScopedURLs = sourceURLs.filter { $0.startAccessingSecurityScopedResource() }
-            defer {
-                securityScopedURLs.forEach { $0.stopAccessingSecurityScopedResource() }
-            }
+            defer { securityScopedURLs.forEach { $0.stopAccessingSecurityScopedResource() } }
 
+            let stagingDirectory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("HappaUniImport-\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.createDirectory(at: stagingDirectory, withIntermediateDirectories: true)
+            var stagedURLs: [URL] = []
+            do {
+                for sourceURL in sourceURLs {
+                    let destination = uniqueImportURL(in: stagingDirectory, filename: sourceURL.lastPathComponent)
+                    try FileManager.default.copyItem(at: sourceURL, to: destination)
+                    stagedURLs.append(destination)
+                }
+                pendingImport = PendingImport(directory: stagingDirectory, urls: stagedURLs)
+            } catch {
+                try? FileManager.default.removeItem(at: stagingDirectory)
+                throw error
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func commitImport(_ pending: PendingImport, folderID: UUID?) {
+        defer { try? FileManager.default.removeItem(at: pending.directory) }
+        do {
             let fileService = FileService()
-            let importedFiles = try fileService.importFiles(sourceURLs, into: fileService.documentsDirectory())
-            let importedDocuments = importedFiles.map { $0.makeDocument(folderID: selectedFolderID) }
-
-            for document in importedDocuments {
-                modelContext.insert(document)
-            }
+            let importedFiles = try fileService.importFiles(pending.urls, into: fileService.documentsDirectory())
+            let importedDocuments = importedFiles.map { $0.makeDocument(folderID: folderID) }
+            for document in importedDocuments { modelContext.insert(document) }
             do {
                 try modelContext.save()
                 selectedDocumentID = importedDocuments.last?.persistentModelID
             } catch {
-                for importedFile in importedFiles {
-                    try? FileManager.default.removeItem(at: importedFile.url)
-                }
+                for importedFile in importedFiles { try? FileManager.default.removeItem(at: importedFile.url) }
                 modelContext.rollback()
                 throw error
             }
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func discardPendingImport(_ pending: PendingImport) {
+        try? FileManager.default.removeItem(at: pending.directory)
+    }
+
+    private func uniqueImportURL(in directory: URL, filename: String) -> URL {
+        let fileManager = FileManager.default
+        let base = URL(fileURLWithPath: filename).deletingPathExtension().lastPathComponent
+        let ext = URL(fileURLWithPath: filename).pathExtension
+        var candidate = directory.appendingPathComponent(filename)
+        var index = 2
+        while fileManager.fileExists(atPath: candidate.path) {
+            candidate = directory.appendingPathComponent("\(base) (\(index))" + (ext.isEmpty ? "" : ".\(ext)"))
+            index += 1
+        }
+        return candidate
     }
 
     private func deleteDocuments(at offsets: IndexSet) {
@@ -432,9 +495,70 @@ struct ContentView: View {
     }
 }
 
+
+private struct ImportDestinationPickerView: View {
+    let fileCount: Int
+    let folders: [LibraryFolder]
+    let onSelect: (UUID?) -> Void
+    let onCancel: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("导入位置") {
+                    Button {
+                        onSelect(nil)
+                        dismiss()
+                    } label: {
+                        Label("未归档", systemImage: "tray")
+                    }
+
+                    FolderDestinationRows(nodes: FolderTreeBuilder.make(from: folders), onSelect: { folderID in
+                        onSelect(folderID)
+                        dismiss()
+                    })
+                }
+            }
+            .navigationTitle("选择文件夹")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") {
+                        onCancel()
+                        dismiss()
+                    }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                Text("将导入 \(fileCount) 个文件")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 8)
+            }
+        }
+    }
+}
+
+private struct FolderDestinationRows: View {
+    let nodes: [FolderTreeNode]
+    let onSelect: (UUID) -> Void
+
+    var body: some View {
+        ForEach(nodes) { node in
+            Button { onSelect(node.folder.id) } label: {
+                Label(node.folder.name, systemImage: "folder")
+            }
+            FolderDestinationRows(nodes: node.children, onSelect: onSelect)
+                .padding(.leading, 20)
+        }
+    }
+}
+
 private struct FolderTreeRows: View {
     let nodes: [FolderTreeNode]
     let documents: [LibraryDocument]
+    let allFolders: [LibraryFolder]
     @Binding var selectedFolderID: UUID?
     @Binding var selectedDocumentID: PersistentIdentifier?
     @Binding var editingDocument: LibraryDocument?
@@ -458,6 +582,7 @@ private struct FolderTreeRows: View {
                 FolderTreeRows(
                     nodes: node.children,
                     documents: documents,
+                    allFolders: allFolders,
                     selectedFolderID: $selectedFolderID,
                     selectedDocumentID: $selectedDocumentID,
                     editingDocument: $editingDocument,
@@ -467,29 +592,59 @@ private struct FolderTreeRows: View {
                     onDeleteDocument: onDeleteDocument
                 )
             } label: {
-                Button {
-                    selectedFolderID = node.folder.id
-                } label: {
-                    Label(
-                        node.folder.name,
-                        systemImage: selectedFolderID == node.folder.id ? "folder.fill" : "folder"
+                Button { selectedFolderID = node.folder.id } label: {
+                    FolderSidebarRow(
+                        name: node.folder.name,
+                        color: FolderAccent.color(for: node.folder.id),
+                        count: documentCount(includingDescendantsOf: node.folder.id),
+                        isSelected: selectedFolderID == node.folder.id
                     )
                 }
                 .buttonStyle(.plain)
             }
             .contextMenu {
-                Button {
-                    onAddSubfolder(node.folder)
-                } label: {
+                Button { onAddSubfolder(node.folder) } label: {
                     Label("新建子文件夹", systemImage: "folder.badge.plus")
                 }
-                Button(role: .destructive) {
-                    onDeleteFolder(node.folder)
-                } label: {
+                Button(role: .destructive) { onDeleteFolder(node.folder) } label: {
                     Label("删除文件夹", systemImage: "trash")
                 }
             }
         }
+    }
+
+    private func documentCount(includingDescendantsOf folderID: UUID) -> Int {
+        let ids = Set(FolderTreeBuilder.descendantIDs(of: folderID, in: allFolders))
+        return documents.filter { $0.folderID.map(ids.contains) ?? false }.count
+    }
+}
+
+private struct FolderSidebarRow: View {
+    let name: String
+    let color: Color
+    let count: Int
+    let isSelected: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Circle().fill(color).frame(width: 14, height: 14)
+            Text(name).lineLimit(1)
+            Spacer(minLength: 8)
+            Text("\(count)")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(isSelected ? Color.white.opacity(0.16) : .clear, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
+private enum FolderAccent {
+    static func color(for id: UUID) -> Color {
+        let colors: [Color] = [.yellow, .orange, .red, .pink, .purple, .blue, .green]
+        return colors[abs(id.uuidString.hashValue) % colors.count]
     }
 }
 
