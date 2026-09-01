@@ -249,11 +249,14 @@ private final class PDFInkOverlayProvider: NSObject, PDFPageOverlayViewProvider,
         let pageIndex = document.index(for: page)
         guard pageIndex != NSNotFound else { return nil }
 
-        let canvas = PKCanvasView()
+        let canvas = ShapeMatchingCanvasView()
         canvas.backgroundColor = .clear
         canvas.isOpaque = false
         canvas.drawingPolicy = .anyInput
         canvas.delegate = self
+        canvas.shapeRecognitionHandler = { [weak self] canvas in
+            self?.matchLastShape(in: canvas)
+        }
         canvas.drawing = drawing(for: pageIndex)
         canvases[pageIndex] = canvas
         configureCanvas(canvas)
@@ -284,6 +287,17 @@ private final class PDFInkOverlayProvider: NSObject, PDFPageOverlayViewProvider,
 
     private func configureCanvas(_ canvas: PKCanvasView) {
         canvas.isUserInteractionEnabled = isMarkupEnabled
+    }
+
+    private func matchLastShape(in canvas: PKCanvasView) {
+        guard isMarkupEnabled, let lastStroke = canvas.drawing.strokes.last else { return }
+        guard let replacement = ShapeMatcher.replacement(for: lastStroke) else { return }
+
+        var strokes = canvas.drawing.strokes
+        strokes.removeLast()
+        strokes.append(replacement)
+        canvas.drawing = PKDrawing(strokes: strokes)
+        persistDrawing(for: canvas)
     }
 
     private func presentNativeToolPicker(for canvas: PKCanvasView, retryIfNeeded: Bool = true) {
@@ -346,6 +360,175 @@ private final class PDFInkOverlayProvider: NSObject, PDFPageOverlayViewProvider,
         }
         saveWorkItem = workItem
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.45, execute: workItem)
+    }
+}
+
+private final class ShapeMatchingCanvasView: PKCanvasView {
+    var shapeRecognitionHandler: ((PKCanvasView) -> Void)?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        drawingGestureRecognizer.addTarget(self, action: #selector(drawingGestureEnded(_:)))
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        drawingGestureRecognizer.addTarget(self, action: #selector(drawingGestureEnded(_:)))
+    }
+
+    @objc private func drawingGestureEnded(_ gestureRecognizer: UIGestureRecognizer) {
+        guard gestureRecognizer.state == .ended else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+            guard let self else { return }
+            self.shapeRecognitionHandler?(self)
+        }
+    }
+}
+
+private enum ShapeMatcher {
+    private static let minimumDimension: CGFloat = 28
+
+    static func replacement(for stroke: PKStroke) -> PKStroke? {
+        let points = stroke.path.map(\.location)
+        guard points.count >= 6 else { return nil }
+
+        let bounds = points.reduce(into: CGRect.null) { partialResult, point in
+            partialResult = partialResult.union(CGRect(origin: point, size: .zero))
+        }
+        guard max(bounds.width, bounds.height) >= minimumDimension else { return nil }
+
+        if let line = matchedLine(points, bounds: bounds) {
+            return matchingStroke(from: line, source: stroke)
+        }
+
+        guard isClosed(points, bounds: bounds) else { return nil }
+
+        if isEllipse(points, bounds: bounds) {
+            return matchingStroke(from: ellipse(in: bounds), source: stroke)
+        }
+
+        if isRectangle(points, bounds: bounds) {
+            return matchingStroke(from: rectangle(in: bounds), source: stroke)
+        }
+
+        return nil
+    }
+
+    private static func matchedLine(_ points: [CGPoint], bounds: CGRect) -> [CGPoint]? {
+        guard let first = points.first, let last = points.last else { return nil }
+        let distance = first.distance(to: last)
+        let diagonal = hypot(bounds.width, bounds.height)
+        guard distance > max(minimumDimension, diagonal * 0.62) else { return nil }
+
+        let averageDeviation = points.reduce(CGFloat.zero) { $0 + $1.distance(toSegmentFrom: first, to: last) }
+            / CGFloat(points.count)
+        guard averageDeviation < max(5, diagonal * 0.035) else { return nil }
+        return interpolated(from: first, to: last, count: 14)
+    }
+
+    private static func isClosed(_ points: [CGPoint], bounds: CGRect) -> Bool {
+        guard let first = points.first, let last = points.last else { return false }
+        return first.distance(to: last) < max(16, hypot(bounds.width, bounds.height) * 0.22)
+    }
+
+    private static func isEllipse(_ points: [CGPoint], bounds: CGRect) -> Bool {
+        let radiusX = bounds.width / 2
+        let radiusY = bounds.height / 2
+        guard radiusX > minimumDimension / 2, radiusY > minimumDimension / 2 else { return false }
+
+        let center = CGPoint(x: bounds.midX, y: bounds.midY)
+        let averageError = points.reduce(CGFloat.zero) { partialResult, point in
+            let x = (point.x - center.x) / radiusX
+            let y = (point.y - center.y) / radiusY
+            return partialResult + abs(hypot(x, y) - 1)
+        } / CGFloat(points.count)
+        return averageError < 0.18
+    }
+
+    private static func isRectangle(_ points: [CGPoint], bounds: CGRect) -> Bool {
+        guard bounds.width >= minimumDimension, bounds.height >= minimumDimension else { return false }
+        let tolerance = max(8, min(bounds.width, bounds.height) * 0.14)
+        let averageEdgeDistance = points.reduce(CGFloat.zero) { partialResult, point in
+            let distance = min(
+                abs(point.x - bounds.minX),
+                abs(point.x - bounds.maxX),
+                abs(point.y - bounds.minY),
+                abs(point.y - bounds.maxY)
+            )
+            return partialResult + distance
+        } / CGFloat(points.count)
+        return averageEdgeDistance < tolerance
+    }
+
+    private static func ellipse(in bounds: CGRect) -> [CGPoint] {
+        let center = CGPoint(x: bounds.midX, y: bounds.midY)
+        let radiusX = bounds.width / 2
+        let radiusY = bounds.height / 2
+        return (0...48).map { index in
+            let angle = CGFloat(index) / 48 * .pi * 2
+            return CGPoint(
+                x: center.x + cos(angle) * radiusX,
+                y: center.y + sin(angle) * radiusY
+            )
+        }
+    }
+
+    private static func rectangle(in bounds: CGRect) -> [CGPoint] {
+        let corners = [
+            CGPoint(x: bounds.minX, y: bounds.minY),
+            CGPoint(x: bounds.maxX, y: bounds.minY),
+            CGPoint(x: bounds.maxX, y: bounds.maxY),
+            CGPoint(x: bounds.minX, y: bounds.maxY),
+            CGPoint(x: bounds.minX, y: bounds.minY)
+        ]
+        return zip(corners, corners.dropFirst()).flatMap { interpolated(from: $0, to: $1, count: 10) }
+    }
+
+    private static func interpolated(from start: CGPoint, to end: CGPoint, count: Int) -> [CGPoint] {
+        (0...count).map { index in
+            let progress = CGFloat(index) / CGFloat(count)
+            return CGPoint(
+                x: start.x + (end.x - start.x) * progress,
+                y: start.y + (end.y - start.y) * progress
+            )
+        }
+    }
+
+    private static func matchingStroke(from locations: [CGPoint], source: PKStroke) -> PKStroke {
+        let template = source.path[0]
+        let controlPoints = locations.enumerated().map { index, location in
+            PKStrokePoint(
+                location: location,
+                timeOffset: TimeInterval(index) * 0.01,
+                size: template.size,
+                opacity: template.opacity,
+                force: template.force,
+                azimuth: template.azimuth,
+                altitude: template.altitude
+            )
+        }
+        let path = PKStrokePath(controlPoints: controlPoints, creationDate: source.path.creationDate)
+        return PKStroke(
+            ink: source.ink,
+            path: path,
+            transform: source.transform,
+            mask: nil
+        )
+    }
+}
+
+private extension CGPoint {
+    func distance(to point: CGPoint) -> CGFloat {
+        hypot(x - point.x, y - point.y)
+    }
+
+    func distance(toSegmentFrom start: CGPoint, to end: CGPoint) -> CGFloat {
+        let deltaX = end.x - start.x
+        let deltaY = end.y - start.y
+        let lengthSquared = deltaX * deltaX + deltaY * deltaY
+        guard lengthSquared > .ulpOfOne else { return distance(to: start) }
+        let projection = max(0, min(1, ((x - start.x) * deltaX + (y - start.y) * deltaY) / lengthSquared))
+        return distance(to: CGPoint(x: start.x + projection * deltaX, y: start.y + projection * deltaY))
     }
 }
 
