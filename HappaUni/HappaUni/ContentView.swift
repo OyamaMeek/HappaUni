@@ -2,6 +2,7 @@ import SwiftData
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
+import PDFKit
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
@@ -67,13 +68,10 @@ struct ContentView: View {
                     .navigationTitle("资料库")
                     .toolbar {
                         ToolbarItem(placement: .topBarLeading) {
-                            LibraryAddMenu(
-                                onImport: { isImporting = true },
-                                onCreateFolder: {
-                                    newFolderParentID = selectedFolderID
-                                    isShowingAddFolder = true
-                                }
-                            )
+                            Button("导入文件", systemImage: "square.and.arrow.down") {
+                                isImporting = true
+                            }
+                            .accessibilityLabel("导入文件")
                         }
                     }
             }
@@ -406,7 +404,10 @@ struct ContentView: View {
             for document in importedDocuments { modelContext.insert(document) }
             do {
                 try modelContext.save()
-                selectedDocumentID = importedDocuments.last?.persistentModelID
+                if let importedDocument = importedDocuments.last {
+                    isBrowsingFolder = false
+                    selectedDocumentID = importedDocument.persistentModelID
+                }
             } catch {
                 for importedFile in importedFiles { try? FileManager.default.removeItem(at: importedFile.url) }
                 modelContext.rollback()
@@ -704,90 +705,6 @@ private struct LibrarySidebarDocumentRow: View {
     }
 }
 
-private struct LibraryAddMenu: View {
-    let onImport: () -> Void
-    let onCreateFolder: () -> Void
-
-    @State private var isPresented = false
-    @State private var pendingAction: (() -> Void)?
-
-    var body: some View {
-        Button {
-            isPresented.toggle()
-        } label: {
-            Image(systemName: "plus")
-                .font(.headline.weight(.semibold))
-                .frame(width: 40, height: 40)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay {
-                    Circle()
-                        .stroke(.white.opacity(0.24), lineWidth: 1)
-                }
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("资料库操作")
-        .popover(isPresented: $isPresented, arrowEdge: .top) {
-            VStack(spacing: 10) {
-                actionButton(
-                    title: "导入",
-                    systemImage: "square.and.arrow.down",
-                    action: onImport
-                )
-                actionButton(
-                    title: "新建文件夹",
-                    systemImage: "folder.badge.plus",
-                    action: onCreateFolder
-                )
-            }
-            .padding(12)
-            .background(
-                .ultraThinMaterial,
-                in: RoundedRectangle(cornerRadius: 22, style: .continuous)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .stroke(
-                        LinearGradient(
-                            colors: [.white.opacity(0.48), .white.opacity(0.08)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        ),
-                        lineWidth: 1
-                    )
-            }
-            .shadow(color: .black.opacity(0.22), radius: 16, y: 8)
-            .presentationCompactAdaptation(.popover)
-        }
-        .onChange(of: isPresented) { _, isVisible in
-            guard !isVisible, let action = pendingAction else { return }
-            pendingAction = nil
-            DispatchQueue.main.async(execute: action)
-        }
-    }
-
-    @ViewBuilder
-    private func actionButton(title: String, systemImage: String, action: @escaping () -> Void) -> some View {
-        Button {
-            pendingAction = action
-            isPresented = false
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: systemImage)
-                    .font(.body.weight(.semibold))
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-            }
-            .frame(minWidth: 132, alignment: .leading)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 11)
-            .background(.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
-    }
-}
-
 private struct AddFolderView: View {
     let parentID: UUID?
 
@@ -868,11 +785,7 @@ private struct FolderLibraryView: View {
                         ForEach(documents) { document in
                             Button { onSelect(document) } label: {
                                 VStack(alignment: .leading, spacing: 10) {
-                                    Image(systemName: document.type.iconName)
-                                        .font(.system(size: 34, weight: .medium))
-                                        .foregroundStyle(folderDocumentColor(for: document.type))
-                                        .frame(maxWidth: .infinity, minHeight: 110)
-                                        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                    DocumentCover(document: document)
                                     Text(document.name)
                                         .font(.subheadline.weight(.semibold))
                                         .foregroundStyle(.primary)
@@ -895,15 +808,68 @@ private struct FolderLibraryView: View {
         }
         .navigationTitle(title)
     }
+}
 
-    private func folderDocumentColor(for type: DocumentType) -> Color {
-        switch type {
+private struct DocumentCover: View {
+    let document: LibraryDocument
+
+    var body: some View {
+        Group {
+            if document.type == .pdf {
+                PDFCoverThumbnail(url: document.url)
+            } else {
+                Image(systemName: document.type.iconName)
+                    .font(.system(size: 34, weight: .medium))
+                    .foregroundStyle(color)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 110)
+        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .accessibilityLabel("\(document.name) 封面")
+    }
+
+    private var color: Color {
+        switch document.type {
         case .pdf: .red
         case .markdown, .tex, .text: .blue
         case .epub: .orange
         case .image: .purple
         case .other: .secondary
         }
+    }
+}
+
+private struct PDFCoverThumbnail: View {
+    let url: URL
+    @State private var thumbnail: UIImage?
+
+    var body: some View {
+        Group {
+            if let thumbnail {
+                Image(uiImage: thumbnail)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(6)
+            } else {
+                Image(systemName: "doc.richtext")
+                    .font(.system(size: 34, weight: .medium))
+                    .foregroundStyle(.red)
+            }
+        }
+        .task(id: url) {
+            thumbnail = makeThumbnail()
+        }
+    }
+
+    private func makeThumbnail() -> UIImage? {
+        guard
+            let document = PDFDocument(url: url),
+            let page = document.page(at: 0)
+        else {
+            return nil
+        }
+        return page.thumbnail(of: CGSize(width: 240, height: 320), for: .mediaBox)
     }
 }
 
