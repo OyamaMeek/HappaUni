@@ -108,6 +108,6 @@
   - `instruct260902.md` (+新增)
   - `docs/CHANGELOG.md` (+新增记录)
 
-- **Git 提交**：`80d9143 docs: add quiz feature implementation spec`
+- **Git 提交**：`b16dea9 docs: add quiz feature implementation spec`
 
 ---
