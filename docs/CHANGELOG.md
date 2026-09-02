@@ -94,3 +94,20 @@
 - **Git 提交**：`c5dcfe5 feat: render AI LaTeX responses`
 
 ---
+## [2026-09-02 12:33] 答题功能开发说明
+
+- **需求/问题描述**：
+  > 为 HappaUni 规划 Markdown 试卷答题、JSON 练习日志，以及 PDF/照片通过 MinerU 转换为可答试卷的完整开发规范。
+
+- **实际实现的功能与改动**：
+  - [开发说明]：新增试卷 Markdown 语法、题型与判分规则、答题流程、日志格式和续答/错题重做规则。
+  - [转换流程]：明确 MinerU 解析后的试题结构化转换、人工校验和无答案题记录策略。
+  - [验证]：`git diff --check` 通过。
+
+- **涉及文件**：
+  - `instruct260902.md` (+新增)
+  - `docs/CHANGELOG.md` (+新增记录)
+
+- **Git 提交**：`80d9143 docs: add quiz feature implementation spec`
+
+---
